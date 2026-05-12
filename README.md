@@ -1,6 +1,13 @@
+
 # UDrive
 
 Unified Google Drive Manager — pool multiple free Google Drive accounts (15GB each) into one seamless storage interface.
+
+## Screenshots
+
+![enter image description here](https://github.com/GegeDevs/udrive/blob/main/screenshots/My%20Drive.png?raw=true)
+
+![enter image description here](https://github.com/GegeDevs/udrive/blob/main/screenshots/Account.png?raw=true)
 
 ## Features
 
