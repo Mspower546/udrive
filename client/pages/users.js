@@ -36,6 +36,7 @@ const PERMISSION_GROUPS = [
     icon: 'people',
     permissions: [
       { key: 'accounts:view', label: 'View Accounts' },
+      { key: 'accounts:view_email', label: 'View Email' },
       { key: 'accounts:add', label: 'Add Account' },
       { key: 'accounts:remove', label: 'Remove Account' },
       { key: 'accounts:set_primary', label: 'Set Primary' },

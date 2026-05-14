@@ -152,7 +152,16 @@ accounts.get('/', async (c) => {
   }
 
   const { results } = await db.prepare('SELECT id, email, display_name, is_primary, storage_limit, storage_used, card_color, created_at FROM accounts ORDER BY is_primary DESC, created_at ASC').all();
-  return c.json(results);
+
+  const canViewEmail = user.role === 'master' || user.permissions.includes('accounts:view_email');
+  const filtered = results.map(acc => {
+    if (!canViewEmail) {
+      return { ...acc, email: '••••••••' };
+    }
+    return acc;
+  });
+
+  return c.json(filtered);
 });
 
 accounts.patch('/:id/color', async (c) => {
