@@ -61,6 +61,17 @@ export function renderSettingsPage() {
                 <button id="btn-save-timezone" class="btn-primary text-sm">Save</button>
               </div>
             </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Time Format</label>
+              <div class="flex gap-3">
+                <button class="time-format-btn px-4 py-2 rounded-lg border text-sm font-medium transition-all border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800" data-format="12">
+                  12-hour
+                </button>
+                <button class="time-format-btn px-4 py-2 rounded-lg border text-sm font-medium transition-all border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800" data-format="24">
+                  24-hour
+                </button>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -173,6 +184,18 @@ export function renderSettingsPage() {
       const theme = btn.dataset.theme;
       setTheme(theme);
       renderSettingsPage();
+    });
+  });
+
+  main.querySelectorAll('.time-format-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      try {
+        await api('/api/settings', { method: 'PUT', body: JSON.stringify({ time_format: btn.dataset.format }) });
+        showToast(`Time format set to ${btn.dataset.format}-hour`, 'success');
+        renderSettingsPage();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
     });
   });
 
@@ -344,6 +367,13 @@ async function loadSettings() {
       const tz = settings.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
       tzSelect.value = tz;
     }
+    const timeFormat = settings.time_format || '24';
+    document.querySelectorAll('.time-format-btn').forEach(btn => {
+      if (btn.dataset.format === timeFormat) {
+        btn.classList.add('border-blue-500', 'bg-blue-50', 'dark:bg-blue-900/30', 'text-blue-700', 'dark:text-blue-300');
+        btn.classList.remove('border-gray-300', 'dark:border-gray-600', 'hover:bg-gray-50', 'dark:hover:bg-gray-800');
+      }
+    });
   } catch (err) {
     // Settings not loaded yet
   }
