@@ -1,5 +1,6 @@
 import { api } from '../api.js';
 import { showToast } from '../components/toast.js';
+import { formatDateTime } from '../time-utils.js';
 
 export async function renderLogsPage() {
   const main = document.getElementById('main-content');
@@ -96,7 +97,7 @@ async function loadLogs() {
           <tbody>
             ${results.map(row => `
               <tr class="border-b border-gray-100 dark:border-gray-800">
-                <td class="py-2 text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">${formatTime(row.created_at)}</td>
+                <td class="py-2 text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">${formatDateTime(row.created_at)}</td>
                 <td class="py-2"><span class="px-2 py-0.5 text-xs font-medium rounded-full ${getLevelColor(row.level)}">${row.level}</span></td>
                 <td class="py-2 text-sm">${escapeHtml(row.message)}</td>
                 <td class="py-2 text-xs text-gray-500 dark:text-gray-400 truncate max-w-[200px] hidden md:table-cell">${escapeHtml(row.detail || '—')}</td>
@@ -118,12 +119,6 @@ function getLevelColor(level) {
     error: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
   };
   return colors[level] || colors.info;
-}
-
-function formatTime(dateStr) {
-  if (!dateStr) return '—';
-  const d = new Date(dateStr);
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
 }
 
 function escapeHtml(str) {

@@ -6,6 +6,7 @@ import { showToast } from '../components/toast.js';
 import { addToUploadQueue, onUploadComplete } from '../components/upload-queue.js';
 import { renderSidebar } from '../components/sidebar.js';
 import { hasPermission } from '../auth-state.js';
+import { formatDate } from '../time-utils.js';
 
 let folderStack = [];
 let currentFiles = [];
@@ -215,12 +216,6 @@ function formatFileSize(bytes) {
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
   if (size < 1024 * 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`;
   return `${(size / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
-
-function formatDate(dateStr) {
-  if (!dateStr) return '—';
-  const d = new Date(dateStr);
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 function clearSelection() {

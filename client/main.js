@@ -15,6 +15,7 @@ import { renderLogsPage } from './pages/logs.js';
 import { showLogoutModal } from './components/logout-modal.js';
 import { api } from './api.js';
 import { setCurrentUser, hasPermission, hasPageAccess, getCurrentUser } from './auth-state.js';
+import { loadTimeSettings } from './time-utils.js';
 
 initTheme();
 
@@ -36,6 +37,7 @@ async function initApp() {
     }
 
     setCurrentUser(user);
+    await loadTimeSettings();
 
     renderSidebar();
     initSidebarToggle();

@@ -1,5 +1,6 @@
 import { api } from '../api.js';
 import { showToast } from '../components/toast.js';
+import { formatDateTime } from '../time-utils.js';
 
 export async function renderActivityPage() {
   const main = document.getElementById('main-content');
@@ -123,7 +124,7 @@ async function loadActivity() {
           <tbody>
             ${results.map(row => `
               <tr class="border-b border-gray-100 dark:border-gray-800">
-                <td class="py-2 text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">${formatTime(row.created_at)}</td>
+                <td class="py-2 text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">${formatDateTime(row.created_at)}</td>
                 <td class="py-2 text-sm font-medium">${escapeHtml(row.username || '—')}</td>
                 <td class="py-2"><span class="px-2 py-0.5 text-xs font-medium rounded-full ${getActionColor(row.action)}">${row.action}</span></td>
                 <td class="py-2 text-xs text-gray-500 dark:text-gray-400 truncate max-w-[200px] hidden md:table-cell">${escapeHtml(row.detail || '—')}</td>
@@ -153,12 +154,6 @@ function getActionColor(action) {
     restore: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300'
   };
   return colors[action] || 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300';
-}
-
-function formatTime(dateStr) {
-  if (!dateStr) return '—';
-  const d = new Date(dateStr);
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
 }
 
 function escapeHtml(str) {
