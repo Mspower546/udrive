@@ -2,6 +2,7 @@ import { api } from '../api.js';
 import { renderStorageBar } from '../components/storage-bar.js';
 import { showToast } from '../components/toast.js';
 import { renderSidebar } from '../components/sidebar.js';
+import { hasPermission } from '../auth-state.js';
 
 export function renderAccountsPage() {
   const main = document.getElementById('main-content');
@@ -12,22 +13,22 @@ export function renderAccountsPage() {
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <h2 class="text-xl md:text-2xl font-semibold">Accounts <span id="accounts-count" class="text-gray-400 font-normal"></span></h2>
           <div class="flex items-center gap-1.5 md:gap-2 flex-wrap">
-          <button id="btn-export-rclone" class="btn-secondary">
+          ${hasPermission('accounts:import_export') ? `<button id="btn-export-rclone" class="btn-secondary">
             <span class="material-icons-outlined text-base md:text-lg">download</span>
             <span class="hidden sm:inline">Export</span>
           </button>
           <button id="btn-import-rclone" class="btn-secondary">
             <span class="material-icons-outlined text-base md:text-lg">upload_file</span>
             <span class="hidden sm:inline">Import</span>
-          </button>
-          <button id="btn-refresh-all" class="btn-secondary">
+          </button>` : ''}
+          ${hasPermission('accounts:refresh') ? `<button id="btn-refresh-all" class="btn-secondary">
             <span class="material-icons-outlined text-base md:text-lg">sync</span>
             <span class="hidden sm:inline">Refresh All</span>
-          </button>
-          <a href="/auth/login" class="btn-primary">
+          </button>` : ''}
+          ${hasPermission('accounts:add') ? `<a href="/auth/login" class="btn-primary">
             <span class="material-icons-outlined text-base md:text-lg">person_add</span>
             <span class="hidden sm:inline">Add Account</span>
-          </a>
+          </a>` : ''}
         </div>
         </div>
       </div>
@@ -104,9 +105,9 @@ export function renderAccountsPage() {
 
   loadAccounts();
 
-  main.querySelector('#btn-export-rclone').addEventListener('click', showExportSelectModal);
+  main.querySelector('#btn-export-rclone')?.addEventListener('click', showExportSelectModal);
 
-  main.querySelector('#btn-refresh-all').addEventListener('click', async () => {
+  main.querySelector('#btn-refresh-all')?.addEventListener('click', async () => {
     const btn = main.querySelector('#btn-refresh-all');
     if (btn.disabled) return;
     btn.disabled = true;
@@ -131,7 +132,7 @@ export function renderAccountsPage() {
     }
   });
 
-  main.querySelector('#btn-import-rclone').addEventListener('click', () => {
+  main.querySelector('#btn-import-rclone')?.addEventListener('click', () => {
     main.querySelector('#rclone-file-input').click();
   });
 
@@ -362,21 +363,21 @@ async function loadAccounts() {
               ${renderStorageBar(acc.storage_used, acc.storage_limit, acc.file_count)}
             </div>
             <div class="flex items-center gap-2 mt-auto">
-              ${!acc.is_primary ? `
+              ${!acc.is_primary && hasPermission('accounts:set_primary') ? `
                 <button class="btn-set-primary px-2 md:px-3 py-1 md:py-1.5 text-[10px] md:text-xs font-medium border border-gray-300 dark:border-gray-600 rounded-full hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:border-blue-300 transition-colors" data-id="${acc.id}">
                   Set as Primary
                 </button>
               ` : ''}
               <div class="ml-auto flex items-center gap-1">
-                <button class="btn-color p-1.5 md:p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors" data-id="${acc.id}" data-color="${color}" title="Change color">
+                ${hasPermission('accounts:color') ? `<button class="btn-color p-1.5 md:p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors" data-id="${acc.id}" data-color="${color}" title="Change color">
                   <span class="material-icons-outlined text-base md:text-lg" style="color: ${color};">palette</span>
-                </button>
-                <button class="btn-refresh p-1.5 md:p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors" data-id="${acc.id}" title="Refresh storage">
+                </button>` : ''}
+                ${hasPermission('accounts:refresh') ? `<button class="btn-refresh p-1.5 md:p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors" data-id="${acc.id}" title="Refresh storage">
                   <span class="material-icons-outlined text-base md:text-lg">refresh</span>
-                </button>
-                <button class="btn-remove p-1.5 md:p-2 rounded-full hover:bg-red-50 dark:hover:bg-red-900/20 text-red-500 transition-colors" data-id="${acc.id}" title="Remove account">
+                </button>` : ''}
+                ${hasPermission('accounts:remove') ? `<button class="btn-remove p-1.5 md:p-2 rounded-full hover:bg-red-50 dark:hover:bg-red-900/20 text-red-500 transition-colors" data-id="${acc.id}" title="Remove account">
                   <span class="material-icons-outlined text-base md:text-lg">delete</span>
-                </button>
+                </button>` : ''}
               </div>
             </div>
           </div>

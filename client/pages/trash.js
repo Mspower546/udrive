@@ -1,5 +1,6 @@
 import { api } from '../api.js';
 import { showToast } from '../components/toast.js';
+import { hasPermission } from '../auth-state.js';
 
 function getFileIcon(mimeType) {
   if (mimeType === 'application/vnd.google-apps.folder') return 'folder';
@@ -46,10 +47,10 @@ export function renderTrashPage() {
               <span class="material-icons-outlined text-base md:text-lg">refresh</span>
               <span class="hidden sm:inline">Refresh</span>
             </button>
-            <button id="btn-empty-trash" class="btn-secondary text-sm">
+            ${hasPermission('trash:empty') ? `<button id="btn-empty-trash" class="btn-secondary text-sm">
               <span class="material-icons-outlined text-base md:text-lg">delete_forever</span>
               <span class="hidden sm:inline">Empty Trash</span>
-            </button>
+            </button>` : ''}
           </div>
         </div>
       </div>
@@ -78,7 +79,7 @@ export function renderTrashPage() {
     }
   });
 
-  main.querySelector('#btn-empty-trash').addEventListener('click', async () => {
+  main.querySelector('#btn-empty-trash')?.addEventListener('click', async () => {
     if (!confirm('Permanently delete ALL trashed files from all accounts? This cannot be undone.')) return;
     const btn = main.querySelector('#btn-empty-trash');
     btn.disabled = true;
@@ -153,12 +154,12 @@ async function loadTrash() {
                 <td class="py-2 text-sm text-gray-500 dark:text-gray-400 hidden sm:table-cell">${formatFileSize(file.size)}</td>
                 <td class="py-2 pr-4">
                   <div class="flex items-center gap-1">
-                    <button class="btn-restore p-1.5 rounded-full hover:bg-green-50 dark:hover:bg-green-900/20 text-green-600 transition-colors" title="Restore">
+                    ${hasPermission('trash:restore') ? `<button class="btn-restore p-1.5 rounded-full hover:bg-green-50 dark:hover:bg-green-900/20 text-green-600 transition-colors" title="Restore">
                       <span class="material-icons-outlined text-base">restore</span>
-                    </button>
-                    <button class="btn-perm-delete p-1.5 rounded-full hover:bg-red-50 dark:hover:bg-red-900/20 text-red-500 transition-colors" title="Delete permanently">
+                    </button>` : ''}
+                    ${hasPermission('trash:permanent_delete') ? `<button class="btn-perm-delete p-1.5 rounded-full hover:bg-red-50 dark:hover:bg-red-900/20 text-red-500 transition-colors" title="Delete permanently">
                       <span class="material-icons-outlined text-base">delete_forever</span>
-                    </button>
+                    </button>` : ''}
                   </div>
                 </td>
               </tr>

@@ -2,6 +2,7 @@ import { api } from '../api.js';
 import { showToast } from '../components/toast.js';
 import { setTheme, getTheme } from '../theme.js';
 import { showLogoutModal } from '../components/logout-modal.js';
+import { hasPermission } from '../auth-state.js';
 
 function getTimezoneOptions() {
   const timezones = Intl.supportedValuesOf('timeZone');
@@ -18,7 +19,7 @@ export function renderSettingsPage() {
       <h2 class="text-xl md:text-2xl font-semibold mb-6">Settings</h2>
 
       <div class="space-y-8">
-        <section>
+        ${hasPermission('settings:edit') ? `<section>
           <h3 class="text-lg font-medium mb-4">Shared Folder</h3>
           <div class="space-y-4">
             <div>
@@ -30,7 +31,7 @@ export function renderSettingsPage() {
               </div>
             </div>
           </div>
-        </section>
+        </section>` : ''}
 
         <section>
           <h3 class="text-lg font-medium mb-4">Appearance</h3>
@@ -75,7 +76,7 @@ export function renderSettingsPage() {
           </div>
         </section>
 
-        <section>
+        ${hasPermission('settings:keepalive') ? `<section>
           <h3 class="text-lg font-medium mb-4">Keep-Alive</h3>
           <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">Automatically generate activity on all accounts to prevent Google from deleting inactive accounts. A small file is uploaded and immediately deleted from each account.</p>
           <div class="space-y-3">
@@ -95,9 +96,9 @@ export function renderSettingsPage() {
               <span id="keepalive-last" class="text-xs text-gray-500 dark:text-gray-400"></span>
             </div>
           </div>
-        </section>
+        </section>` : ''}
 
-        <section>
+        ${hasPermission('settings:edit') ? `<section>
           <h3 class="text-lg font-medium mb-4">Logging</h3>
           <div class="space-y-3">
             <label class="flex items-center justify-between cursor-pointer">
@@ -115,9 +116,9 @@ export function renderSettingsPage() {
               <input type="checkbox" id="toggle-logs" class="w-5 h-5 rounded border-gray-300 dark:border-gray-600 text-blue-600">
             </label>
           </div>
-        </section>
+        </section>` : ''}
 
-        <section>
+        ${hasPermission('settings:database') ? `<section>
           <h3 class="text-lg font-medium mb-4">Database</h3>
           <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">Download or upload database for migration between Local and Cloudflare deployments.</p>
           <div class="space-y-3">
@@ -156,7 +157,7 @@ export function renderSettingsPage() {
               <input type="file" id="import-db-input" class="hidden" accept=".json">
             </div>
           </div>
-        </section>
+        </section>` : ''}
 
         <section>
           <h3 class="text-lg font-medium mb-4">About</h3>
@@ -199,7 +200,7 @@ export function renderSettingsPage() {
     });
   });
 
-  main.querySelector('#btn-save-folder').addEventListener('click', async () => {
+  main.querySelector('#btn-save-folder')?.addEventListener('click', async () => {
     const folderId = main.querySelector('#input-folder-id').value.trim();
     try {
       await api('/api/settings', { method: 'PUT', body: JSON.stringify({ shared_folder_id: folderId }) });
@@ -209,7 +210,7 @@ export function renderSettingsPage() {
     }
   });
 
-  main.querySelector('#btn-save-timezone').addEventListener('click', async () => {
+  main.querySelector('#btn-save-timezone')?.addEventListener('click', async () => {
     const tz = main.querySelector('#input-timezone').value;
     try {
       await api('/api/settings', { method: 'PUT', body: JSON.stringify({ timezone: tz }) });
@@ -219,7 +220,7 @@ export function renderSettingsPage() {
     }
   });
 
-  main.querySelector('#toggle-activity').addEventListener('change', async (e) => {
+  main.querySelector('#toggle-activity')?.addEventListener('change', async (e) => {
     try {
       await api('/api/settings', { method: 'PUT', body: JSON.stringify({ activity_enabled: e.target.checked ? '1' : '0' }) });
       showToast(`Activity log ${e.target.checked ? 'enabled' : 'disabled'}`, 'success');
@@ -229,7 +230,7 @@ export function renderSettingsPage() {
     }
   });
 
-  main.querySelector('#toggle-logs').addEventListener('change', async (e) => {
+  main.querySelector('#toggle-logs')?.addEventListener('change', async (e) => {
     try {
       await api('/api/settings', { method: 'PUT', body: JSON.stringify({ logs_enabled: e.target.checked ? '1' : '0' }) });
       showToast(`System logs ${e.target.checked ? 'enabled' : 'disabled'}`, 'success');
@@ -239,7 +240,7 @@ export function renderSettingsPage() {
     }
   });
 
-  main.querySelector('#btn-save-keepalive').addEventListener('click', async () => {
+  main.querySelector('#btn-save-keepalive')?.addEventListener('click', async () => {
     const days = main.querySelector('#input-keepalive-days').value.trim();
     try {
       await api('/api/settings', { method: 'PUT', body: JSON.stringify({ keepalive_interval_days: days || '0' }) });
@@ -249,7 +250,7 @@ export function renderSettingsPage() {
     }
   });
 
-  main.querySelector('#btn-run-keepalive').addEventListener('click', async () => {
+  main.querySelector('#btn-run-keepalive')?.addEventListener('click', async () => {
     const btn = main.querySelector('#btn-run-keepalive');
     if (btn.disabled) return;
     btn.disabled = true;
@@ -272,7 +273,7 @@ export function renderSettingsPage() {
     }
   });
 
-  main.querySelector('#btn-export-db').addEventListener('click', async () => {
+  main.querySelector('#btn-export-db')?.addEventListener('click', async () => {
     const selectedTables = [...main.querySelectorAll('.db-table-cb:checked')].map(cb => cb.value);
     if (selectedTables.length === 0) { showToast('Select at least one data type', 'error'); return; }
 
@@ -301,7 +302,7 @@ export function renderSettingsPage() {
     }
   });
 
-  main.querySelector('#btn-import-db').addEventListener('click', () => {
+  main.querySelector('#btn-import-db')?.addEventListener('click', () => {
     main.querySelector('#import-db-input').click();
   });
 
