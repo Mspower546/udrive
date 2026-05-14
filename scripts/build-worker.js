@@ -8,7 +8,6 @@ await build({
   target: 'es2022',
   platform: 'neutral',
   conditions: ['workerd', 'worker', 'browser'],
-  external: ['node:crypto', 'node:util'],
   sourcemap: true,
   minify: true
 });
