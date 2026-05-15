@@ -10,6 +10,19 @@ body {
   font-family: var(--font-sans);
 }
 
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+#mobile-nav .mobile-nav-link {
+  flex: 1 0 auto;
+  min-width: 3.5rem;
+}
+
 .storage-bar {
   @apply h-2 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden;
 }

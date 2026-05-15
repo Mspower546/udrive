@@ -22,8 +22,17 @@ export function showContextMenu(x, y, items) {
   menuEl.classList.remove('hidden');
 
   const rect = menuEl.getBoundingClientRect();
-  if (rect.right > window.innerWidth) menuEl.style.left = `${x - rect.width}px`;
-  if (rect.bottom > window.innerHeight) menuEl.style.top = `${y - rect.height}px`;
+  let finalX = x;
+  let finalY = y;
+
+  if (rect.right > window.innerWidth) finalX = x - rect.width;
+  if (finalX < 0) finalX = 8;
+
+  if (rect.bottom > window.innerHeight) finalY = y - rect.height;
+  if (finalY < 0) finalY = 8;
+
+  menuEl.style.left = `${finalX}px`;
+  menuEl.style.top = `${finalY}px`;
 
   menuEl.querySelectorAll('.context-menu-item').forEach(el => {
     el.addEventListener('click', () => {

@@ -3,7 +3,7 @@ import { getQueryParams } from '../router.js';
 import { renderBreadcrumb } from '../components/breadcrumb.js';
 import { showContextMenu, hideContextMenu } from '../components/context-menu.js';
 import { showToast } from '../components/toast.js';
-import { addToUploadQueue, onUploadComplete, downloadBackground, downloadViaBrowser } from '../components/transfer-panel.js';
+import { addToUploadQueue, onUploadComplete, downloadBackground, downloadViaBrowser, addTransferOwnership } from '../components/transfer-panel.js';
 import { renderSidebar } from '../components/sidebar.js';
 import { hasPermission } from '../auth-state.js';
 import { formatDate } from '../time-utils.js';
@@ -48,11 +48,6 @@ async function pasteFiles() {
 
   const params = getQueryParams();
   const destinationId = params.get('folderId') || null;
-
-  if (!destinationId) {
-    showToast('Navigate to a folder to paste', 'error');
-    return;
-  }
 
   let success = 0;
   for (const file of clipboard.files) {
@@ -244,21 +239,12 @@ function selectAll() {
 function updateSelectionUI() {
   document.querySelectorAll('.file-item').forEach(row => {
     const id = row.dataset.id;
-    const checkbox = row.querySelector('.file-checkbox');
     if (selectedFiles.has(id)) {
       row.classList.add('selected');
-      if (checkbox) checkbox.checked = true;
     } else {
       row.classList.remove('selected');
-      if (checkbox) checkbox.checked = false;
     }
   });
-
-  const selectAllCb = document.getElementById('select-all-cb');
-  if (selectAllCb) {
-    selectAllCb.checked = selectedFiles.size === currentFiles.length && currentFiles.length > 0;
-    selectAllCb.indeterminate = selectedFiles.size > 0 && selectedFiles.size < currentFiles.length;
-  }
 
   const bulkBar = document.getElementById('bulk-actions');
   if (bulkBar) {
@@ -317,8 +303,7 @@ function renderListView(container) {
       <table class="w-full border-collapse">
         <thead>
           <tr class="text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider border-b border-gray-200 dark:border-gray-700">
-            <th class="pb-3 pt-2 pl-4 w-10 sticky top-0 bg-white dark:bg-gray-900 z-[5]"><input type="checkbox" id="select-all-cb" class="rounded border-gray-300 dark:border-gray-600"></th>
-            <th class="pb-3 pt-2 sticky top-0 bg-white dark:bg-gray-900 z-[5]">Name</th>
+            <th class="pb-3 pt-2 sticky top-0 bg-white dark:bg-gray-900 z-[5] pl-4">Name</th>
             <th class="pb-3 pt-2 hidden md:table-cell sticky top-0 bg-white dark:bg-gray-900 z-[5]">Modified</th>
             <th class="pb-3 pt-2 hidden sm:table-cell sticky top-0 bg-white dark:bg-gray-900 z-[5]">Size</th>
             <th class="pb-3 pt-2 pr-4 w-10 sticky top-0 bg-white dark:bg-gray-900 z-[5]"></th>
@@ -329,12 +314,9 @@ function renderListView(container) {
           const targetId = file.shortcutDetails?.targetId || '';
           const targetMime = file.shortcutDetails?.targetMimeType || '';
           return `
-          <tr class="file-item border-b border-gray-100 dark:border-gray-800 cursor-pointer"
+          <tr class="file-item border-b border-gray-100 dark:border-gray-800 cursor-pointer select-none"
               data-id="${file.id}" data-name="${escapeAttr(file.name)}" data-mime="${file.mimeType}" data-target-id="${targetId}" data-target-mime="${targetMime}">
             <td class="py-2 pl-4">
-              <input type="checkbox" class="file-checkbox rounded border-gray-300 dark:border-gray-600" data-id="${file.id}">
-            </td>
-            <td class="py-2">
               <div class="flex items-center gap-3">
                 <span class="material-icons-outlined text-2xl ${getFileIconColor(file.mimeType)}">${getFileIcon(file.mimeType)}</span>
                 <span class="text-sm font-medium truncate max-w-md">${escapeHtml(file.name)}</span>
@@ -359,10 +341,6 @@ function renderListView(container) {
 
 function renderGridView(container) {
   container.innerHTML = `
-    <div class="mb-3 flex items-center gap-2">
-      <input type="checkbox" id="select-all-cb" class="rounded border-gray-300 dark:border-gray-600">
-      <label for="select-all-cb" class="text-xs text-gray-500 dark:text-gray-400">Select all</label>
-    </div>
     <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2 md:gap-3">
       ${currentFiles.map(file => {
         const isImage = file.mimeType?.startsWith('image/');
@@ -375,9 +353,8 @@ function renderGridView(container) {
           : `<span class="material-icons-outlined text-5xl ${getFileIconColor(file.mimeType)} mb-2">${getFileIcon(file.mimeType)}</span>`;
 
         return `
-        <div class="file-item group relative border border-gray-200 dark:border-gray-700 rounded-xl p-3 hover:shadow-md transition-all cursor-pointer flex flex-col items-center text-center"
+        <div class="file-item group relative border border-gray-200 dark:border-gray-700 rounded-xl p-3 hover:shadow-md transition-all cursor-pointer select-none flex flex-col items-center text-center"
              data-id="${file.id}" data-name="${escapeAttr(file.name)}" data-mime="${file.mimeType}" data-target-id="${targetId}" data-target-mime="${targetMime}">
-          <input type="checkbox" class="file-checkbox absolute top-2 left-2 rounded border-gray-300 dark:border-gray-600 opacity-0 group-hover:opacity-100 checked:opacity-100 transition-opacity" data-id="${file.id}">
           <button class="file-more-btn absolute top-2 right-2 p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 opacity-0 group-hover:opacity-100 transition-opacity">
             <span class="material-icons-outlined text-base">more_vert</span>
           </button>
@@ -430,21 +407,17 @@ function loadThumbnail(container, fileId) {
   img.src = `/api/files/${fileId}/thumbnail?size=200`;
 }
 
+let lastClickedIndex = -1;
+let selectionMode = false;
+
 function bindFileEvents(container) {
-  const selectAllCb = container.querySelector('#select-all-cb') || document.getElementById('select-all-cb');
-  if (selectAllCb) {
-    selectAllCb.addEventListener('change', () => selectAll());
-  }
+  const fileItems = container.querySelectorAll('.file-item');
 
-  container.querySelectorAll('.file-checkbox').forEach(cb => {
-    cb.addEventListener('click', (e) => {
-      e.stopPropagation();
-      toggleSelection(cb.dataset.id);
-    });
-  });
+  fileItems.forEach((row, index) => {
+    let longPressTimer = null;
 
-  container.querySelectorAll('.file-item').forEach(row => {
     row.addEventListener('dblclick', () => {
+      if (selectionMode) return;
       const mime = row.dataset.mime;
       const id = row.dataset.id;
       const name = row.dataset.name;
@@ -466,11 +439,57 @@ function bindFileEvents(container) {
       }
     });
 
+    // Long press for touch devices
+    row.addEventListener('touchstart', (e) => {
+      longPressTimer = setTimeout(() => {
+        longPressTimer = null;
+        selectionMode = true;
+        toggleSelection(row.dataset.id);
+        lastClickedIndex = index;
+      }, 500);
+    }, { passive: true });
+
+    row.addEventListener('touchend', () => {
+      if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+    });
+
+    row.addEventListener('touchmove', () => {
+      if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+    });
+
     row.addEventListener('click', (e) => {
-      if (e.target.closest('.file-checkbox') || e.target.closest('.file-more-btn')) return;
-      if (e.ctrlKey || e.metaKey) {
+      if (e.target.closest('.file-more-btn')) return;
+
+      if (selectionMode) {
         e.preventDefault();
         toggleSelection(row.dataset.id);
+        lastClickedIndex = index;
+        if (selectedFiles.size === 0) selectionMode = false;
+        return;
+      }
+
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        selectionMode = true;
+        toggleSelection(row.dataset.id);
+        lastClickedIndex = index;
+      } else if (e.shiftKey && lastClickedIndex >= 0) {
+        e.preventDefault();
+        const start = Math.min(lastClickedIndex, index);
+        const end = Math.max(lastClickedIndex, index);
+        selectedFiles.clear();
+        for (let i = start; i <= end; i++) {
+          const item = fileItems[i];
+          if (item) selectedFiles.add(item.dataset.id);
+        }
+        selectionMode = true;
+        updateSelectionUI();
+      } else if (!e.shiftKey && !e.ctrlKey && !e.metaKey) {
+        if (selectedFiles.size > 0) {
+          clearSelection();
+          selectionMode = false;
+        }
+        lastClickedIndex = index;
       }
     });
 
@@ -537,12 +556,105 @@ function showFileContextMenu(x, y, dataset) {
     items.push({ icon: 'drive_file_rename_outline', label: 'Rename', action: 'rename', handler: () => renameAction(dataset.id, dataset.name) });
   }
 
+  if (hasPermission('drive:transfer_owner') && !isFolder) {
+    items.push({ icon: 'swap_horiz', label: 'Transfer Owner', action: 'transfer', handler: () => showTransferModal(dataset.id, dataset.name) });
+  }
+
   if (hasPermission('drive:delete')) {
     items.push({ divider: true });
     items.push({ icon: 'delete', label: 'Delete', action: 'delete', handler: () => deleteAction(dataset.id, dataset.name) });
   }
 
   showContextMenu(x, y, items);
+}
+
+async function showTransferModal(fileId, fileName, fileSize = 0, bulkFiles = null) {
+  const existing = document.getElementById('transfer-owner-modal');
+  if (existing) existing.remove();
+
+  let accounts;
+  try {
+    accounts = await api('/api/accounts');
+  } catch (err) {
+    showToast(err.message, 'error');
+    return;
+  }
+
+  // Get file info for size and current owner
+  let currentOwner = '—';
+  let totalSize = fileSize;
+
+  if (bulkFiles) {
+    totalSize = bulkFiles.reduce((sum, f) => sum + (parseInt(f.size) || 0), 0);
+  } else if (!fileSize) {
+    try {
+      const info = await api(`/api/files/${fileId}/info`);
+      totalSize = parseInt(info.size) || 0;
+      currentOwner = info.uploaderName || info.uploaderEmail || '—';
+    } catch {}
+  }
+
+  const fileLabel = bulkFiles ? `${bulkFiles.length} files` : escapeHtml(fileName);
+
+  const modal = document.createElement('div');
+  modal.id = 'transfer-owner-modal';
+  modal.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black/50';
+  modal.innerHTML = `
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-sm mx-4 flex flex-col max-h-[80vh]">
+      <div class="p-4 border-b border-gray-200 dark:border-gray-700">
+        <h3 class="text-sm font-semibold">Transfer Ownership</h3>
+        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1 truncate">${fileLabel}</p>
+        <div class="flex items-center gap-3 mt-2 text-xs text-gray-500 dark:text-gray-400">
+          <span>Size: <strong>${formatFileSize(totalSize)}</strong></span>
+          ${!bulkFiles ? `<span>Owner: <strong>${escapeHtml(currentOwner)}</strong></span>` : ''}
+        </div>
+      </div>
+      <div class="p-4 overflow-auto space-y-2">
+        <p class="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Select target account:</p>
+        ${accounts.map(acc => {
+          const freeSpace = acc.storage_limit - acc.storage_used;
+          const hasSpace = freeSpace >= totalSize;
+          return `
+          <label class="flex items-center gap-3 p-2 rounded-lg border ${hasSpace ? 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer' : 'border-red-200 dark:border-red-900 bg-red-50/50 dark:bg-red-900/10 opacity-60 cursor-not-allowed'}">
+            <input type="radio" name="transfer-target" value="${acc.id}" class="text-blue-600" ${!hasSpace ? 'disabled' : ''}>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-medium truncate">${escapeHtml(acc.display_name || acc.email)}</p>
+              <p class="text-[10px] text-gray-500 dark:text-gray-400">${(acc.storage_used / (1024**3)).toFixed(1)} / ${(acc.storage_limit / (1024**3)).toFixed(0)} GB · Free: ${formatFileSize(freeSpace)}</p>
+            </div>
+            ${acc.is_primary ? '<span class="text-[10px] px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-full shrink-0">Primary</span>' : ''}
+            ${!hasSpace ? '<span class="text-[10px] px-1.5 py-0.5 bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 rounded-full shrink-0">Full</span>' : ''}
+          </label>
+        `;}).join('')}
+      </div>
+      <div class="p-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-2">
+        <button id="transfer-cancel" class="btn-secondary text-sm">Cancel</button>
+        <button id="transfer-confirm" class="btn-primary text-sm">Transfer</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+
+  modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+  modal.querySelector('#transfer-cancel').addEventListener('click', () => modal.remove());
+
+  modal.querySelector('#transfer-confirm').addEventListener('click', async () => {
+    const selected = modal.querySelector('input[name="transfer-target"]:checked');
+    if (!selected) { showToast('Select a target account', 'error'); return; }
+
+    const targetId = parseInt(selected.value);
+
+    if (bulkFiles) {
+      for (const f of bulkFiles) {
+        addTransferOwnership(f.id, f.name, targetId);
+      }
+      showToast(`${bulkFiles.length} transfer(s) started in background`, 'info');
+    } else {
+      addTransferOwnership(fileId, fileName, targetId);
+      showToast('Transfer started in background', 'info');
+    }
+    modal.remove();
+  });
 }
 
 async function downloadViaBrowserAction(fileId, name) {
@@ -753,25 +865,26 @@ export function renderFilesPage() {
           </div>
         </div>
 
-        <div id="bulk-actions" class="hidden mb-4 flex items-center gap-2 md:gap-3 px-3 md:px-4 py-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-          <span class="selected-count text-xs md:text-sm font-medium text-blue-700 dark:text-blue-300">0 selected</span>
-          <div class="flex items-center gap-1 ml-auto">
-            ${hasPermission('drive:copy') ? `<button id="bulk-copy" class="p-2 rounded-full hover:bg-blue-100 dark:hover:bg-blue-800 text-blue-700 dark:text-blue-300 transition-colors" title="Copy selected">
-              <span class="material-icons-outlined text-lg">content_copy</span>
-            </button>` : ''}
-            ${hasPermission('drive:move') ? `<button id="bulk-cut" class="p-2 rounded-full hover:bg-blue-100 dark:hover:bg-blue-800 text-blue-700 dark:text-blue-300 transition-colors" title="Cut selected">
-              <span class="material-icons-outlined text-lg">content_cut</span>
-            </button>` : ''}
-            ${(hasPermission('drive:download_browser') || hasPermission('drive:download_background')) ? `<button id="bulk-download" class="p-2 rounded-full hover:bg-blue-100 dark:hover:bg-blue-800 text-blue-700 dark:text-blue-300 transition-colors" title="Download selected">
-              <span class="material-icons-outlined text-lg">download</span>
-            </button>` : ''}
-            ${hasPermission('drive:delete') ? `<button id="bulk-delete" class="p-2 rounded-full hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 transition-colors" title="Delete selected">
-              <span class="material-icons-outlined text-lg">delete</span>
-            </button>` : ''}
-            <button id="bulk-clear" class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors" title="Clear selection">
-              <span class="material-icons-outlined text-lg">close</span>
-            </button>
-          </div>
+        <div id="bulk-actions" class="hidden mb-2 flex items-center gap-1 px-2 py-1 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+          <span class="selected-count text-xs font-medium text-blue-700 dark:text-blue-300 mr-auto">0</span>
+          ${hasPermission('drive:copy') ? `<button id="bulk-copy" class="p-1.5 rounded-full hover:bg-blue-100 dark:hover:bg-blue-800 text-blue-700 dark:text-blue-300 transition-colors" title="Copy">
+            <span class="material-icons-outlined text-base">content_copy</span>
+          </button>` : ''}
+          ${hasPermission('drive:move') ? `<button id="bulk-cut" class="p-1.5 rounded-full hover:bg-blue-100 dark:hover:bg-blue-800 text-blue-700 dark:text-blue-300 transition-colors" title="Cut">
+            <span class="material-icons-outlined text-base">content_cut</span>
+          </button>` : ''}
+          ${(hasPermission('drive:download_browser') || hasPermission('drive:download_background')) ? `<button id="bulk-download" class="p-1.5 rounded-full hover:bg-blue-100 dark:hover:bg-blue-800 text-blue-700 dark:text-blue-300 transition-colors" title="Download">
+            <span class="material-icons-outlined text-base">download</span>
+          </button>` : ''}
+          ${hasPermission('drive:delete') ? `<button id="bulk-delete" class="p-1.5 rounded-full hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 transition-colors" title="Delete">
+            <span class="material-icons-outlined text-base">delete</span>
+          </button>` : ''}
+          ${hasPermission('drive:transfer_owner') ? `<button id="bulk-transfer" class="p-1.5 rounded-full hover:bg-purple-100 dark:hover:bg-purple-900/30 text-purple-600 transition-colors" title="Transfer Owner">
+            <span class="material-icons-outlined text-base">swap_horiz</span>
+          </button>` : ''}
+          <button id="bulk-clear" class="p-1.5 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors" title="Clear">
+            <span class="material-icons-outlined text-base">close</span>
+          </button>
         </div>
         </div>
 
@@ -833,6 +946,14 @@ export function renderFilesPage() {
   main.querySelector('#bulk-download')?.addEventListener('click', bulkDownload);
   main.querySelector('#bulk-copy')?.addEventListener('click', () => setClipboard('copy'));
   main.querySelector('#bulk-cut')?.addEventListener('click', () => setClipboard('cut'));
+  main.querySelector('#bulk-transfer')?.addEventListener('click', () => {
+    const bulkFiles = [...selectedFiles].map(id => {
+      const file = currentFiles.find(f => f.id === id);
+      return file ? { id, name: file.name, size: parseInt(file.size) || 0 } : null;
+    }).filter(f => f && f.id);
+    if (bulkFiles.length === 0) return;
+    showTransferModal(null, null, 0, bulkFiles);
+  });
   main.querySelector('#bulk-clear').addEventListener('click', clearSelection);
   main.querySelector('#btn-paste').addEventListener('click', pasteFiles);
 

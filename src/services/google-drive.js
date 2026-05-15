@@ -180,7 +180,7 @@ export async function getFileOwnerEmail(env, db, accountId, fileId) {
 
 export async function getFileInfo(env, db, accountId, fileId) {
   const headers = await getAuthHeaders(env, db, accountId);
-  const res = await fetch(`${DRIVE_API}/files/${fileId}?fields=id,name,mimeType,size,modifiedTime,createdTime,owners(emailAddress,displayName),shared`, { headers });
+  const res = await fetch(`${DRIVE_API}/files/${fileId}?fields=id,name,mimeType,size,modifiedTime,createdTime,parents,owners(emailAddress,displayName),shared`, { headers });
   if (!res.ok) throw new Error('File info fetch failed');
   return res.json();
 }

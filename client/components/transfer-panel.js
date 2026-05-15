@@ -1,5 +1,6 @@
 let uploadQueue = [];
 let downloadQueue = [];
+let transferQueue = [];
 let panelEl = null;
 let floatingBtn = null;
 let isMinimized = false;
@@ -40,7 +41,8 @@ export function onUploadComplete(callback) {
 export function getAllTransfers() {
   return [
     ...uploadQueue.map(i => ({ ...i, name: i.file?.name, size: i.file?.size || 0 })),
-    ...downloadQueue.map(i => ({ ...i, name: i.fileName, size: i.totalSize || 0 }))
+    ...downloadQueue.map(i => ({ ...i, name: i.fileName, size: i.totalSize || 0 })),
+    ...transferQueue.map(i => ({ ...i, name: i.fileName, size: 0 }))
   ];
 }
 
@@ -63,6 +65,37 @@ export function downloadBackground(fileId, fileName) {
   renderPanel(true);
   notifyChange();
   startDownload(item);
+}
+
+// Transfer ownership (background)
+export function addTransferOwnership(fileId, fileName, targetAccountId) {
+  const item = { id: Date.now() + Math.random(), fileId, fileName, targetAccountId, type: 'transfer', status: 'transferring', progress: 0 };
+  transferQueue.push(item);
+  renderPanel(true);
+  notifyChange();
+  startTransferOwnership(item);
+  return item;
+}
+
+async function startTransferOwnership(item) {
+  try {
+    const res = await fetch(`/api/files/${item.fileId}/transfer-owner`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetAccountId: item.targetAccountId })
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `Transfer failed: ${res.status}`);
+    }
+    item.status = 'done';
+    item.progress = 100;
+  } catch (err) {
+    item.status = 'failed';
+    item.error = err.message;
+  }
+  renderPanel(true);
+  notifyChange();
 }
 
 // Download browser
@@ -439,13 +472,14 @@ function renderItem(item) {
     case 'waiting': statusIcon = 'schedule'; statusColor = 'text-gray-400'; break;
     case 'uploading': statusIcon = 'upload'; statusColor = 'text-blue-500'; break;
     case 'downloading': statusIcon = 'download'; statusColor = 'text-green-500'; break;
+    case 'transferring': statusIcon = 'swap_horiz'; statusColor = 'text-purple-500'; break;
     case 'paused': statusIcon = 'pause_circle'; statusColor = 'text-yellow-500'; break;
     case 'done': statusIcon = 'check_circle'; statusColor = 'text-green-500'; break;
     case 'failed': statusIcon = 'error'; statusColor = 'text-red-500'; break;
     case 'cancelled': statusIcon = 'cancel'; statusColor = 'text-gray-400'; break;
   }
 
-  const isActive = ['uploading', 'downloading', 'waiting'].includes(item.status);
+  const isActive = ['uploading', 'downloading', 'waiting', 'transferring'].includes(item.status);
   const isPaused = item.status === 'paused';
   const isDownloading = item.status === 'downloading';
 

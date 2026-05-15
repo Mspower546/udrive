@@ -17,7 +17,8 @@ const PERMISSION_GROUPS = [
       { key: 'drive:move', label: 'Move Files' },
       { key: 'drive:copy', label: 'Copy Files' },
       { key: 'drive:preview', label: 'Preview Files' },
-      { key: 'drive:view_uploader', label: 'View Uploader Info' }
+      { key: 'drive:view_uploader', label: 'View Uploader Info' },
+      { key: 'drive:transfer_owner', label: 'Transfer Ownership' }
     ]
   },
   {

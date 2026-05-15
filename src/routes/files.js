@@ -360,7 +360,18 @@ files.post('/:fileId/move', async (c) => {
   const accountId = await getPrimaryAccountId(db);
   if (!accountId) return c.json({ error: 'No primary account set' }, 400);
 
-  const result = await drive.moveFile(c.env, db, accountId, fileId, newParentId, oldParentId);
+  // Get actual parent if oldParentId not provided
+  let removeParent = oldParentId;
+  if (!removeParent) {
+    const fileInfo = await drive.getFileInfo(c.env, db, accountId, fileId);
+    removeParent = fileInfo.parents?.[0];
+  }
+
+  // Fallback to shared folder if newParentId not provided
+  const addParent = newParentId || await getSharedFolderId(db);
+  if (!addParent) return c.json({ error: 'No destination folder' }, 400);
+
+  const result = await drive.moveFile(c.env, db, accountId, fileId, addParent, removeParent);
   await logActivity(db, user.id, user.username, 'move', fileId);
   return c.json(result);
 });
@@ -415,6 +426,59 @@ files.post('/:fileId/permanent-delete', async (c) => {
   await drive.permanentDeleteFile(c.env, db, accountId, fileId);
   await logActivity(db, user.id, user.username, 'permanent_delete', fileId);
   return c.json({ success: true });
+});
+
+files.post('/:fileId/transfer-owner', async (c) => {
+  const user = c.get('user');
+  let err = requireAuth(c, user);
+  if (err) return err;
+  err = requirePermission(c, user, 'drive:transfer_owner');
+  if (err) return err;
+
+  const db = c.get("db");
+  const fileId = c.req.param('fileId');
+  const { targetAccountId } = await c.req.json();
+  if (!targetAccountId) return c.json({ error: 'No target account provided' }, 400);
+
+  // Get source account (current owner)
+  let sourceAccountId;
+  const owner = await db.prepare('SELECT account_id FROM file_owners WHERE file_id = ?').bind(fileId).first();
+  if (owner) {
+    sourceAccountId = owner.account_id;
+  } else {
+    const primaryId = await getPrimaryAccountId(db);
+    if (!primaryId) return c.json({ error: 'No primary account set' }, 400);
+    const ownerEmail = await drive.getFileOwnerEmail(c.env, db, primaryId, fileId);
+    if (ownerEmail) {
+      const matched = await db.prepare('SELECT id FROM accounts WHERE email = ?').bind(ownerEmail).first();
+      if (matched) sourceAccountId = matched.id;
+    }
+    if (!sourceAccountId) sourceAccountId = primaryId;
+  }
+
+  if (sourceAccountId === targetAccountId) return c.json({ error: 'Source and target are the same account' }, 400);
+
+  // Get file info including parent folder
+  const fileInfo = await drive.getFileInfo(c.env, db, sourceAccountId, fileId);
+  const parentFolder = fileInfo.parents?.[0] || await getSharedFolderId(db);
+
+  // Step 1: Copy file to target account (lands in target's root or shared folder)
+  const newFile = await drive.copyFile(c.env, db, targetAccountId, fileId, parentFolder);
+
+  // Step 2: Delete original from source account
+  await drive.permanentDeleteFile(c.env, db, sourceAccountId, fileId);
+
+  // Step 3: Move new file to original parent folder (ensure correct location)
+  try {
+    await drive.moveFile(c.env, db, targetAccountId, newFile.id, parentFolder, parentFolder);
+  } catch {}
+
+  // Update file_owners
+  await db.prepare('DELETE FROM file_owners WHERE file_id = ?').bind(fileId).run();
+  await db.prepare('INSERT OR REPLACE INTO file_owners (file_id, account_id) VALUES (?, ?)').bind(newFile.id, targetAccountId).run();
+
+  await logActivity(db, user.id, user.username, 'transfer_owner', `${fileInfo.name} → account #${targetAccountId}`);
+  return c.json({ success: true, newFileId: newFile.id });
 });
 
 export default files;

@@ -66,7 +66,7 @@ export function updateSidebarContent(sidebar, totalUsed, totalLimit, collapsed) 
   } else {
     sidebar.className = 'hidden md:flex w-64 border-r border-gray-200 dark:border-gray-700 flex-col shrink-0 transition-all duration-200';
     sidebar.innerHTML = `
-      <nav class="flex-1 p-3 space-y-1">
+      <nav class="flex-1 p-3 space-y-1 overflow-y-auto scrollbar-hide">
         ${navItems.map(item => `
           <a href="#${item.path}" class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-full text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors" data-path="${item.path}">
             <span class="material-icons-outlined text-xl">${item.icon}</span>
