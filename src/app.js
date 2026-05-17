@@ -9,6 +9,7 @@ import activityRoutes from './routes/activity.js';
 import logsRoutes from './routes/logs.js';
 import apiV1Routes from './routes/api-v1.js';
 import apiKeysRoutes from './routes/api-keys.js';
+import { sharePublic, shareAdmin } from './routes/share.js';
 
 export function createApp(getDB, envVars = null) {
   const app = new Hono();
@@ -39,7 +40,9 @@ export function createApp(getDB, envVars = null) {
   });
 
   // Routes
+  app.route('/share', sharePublic);
   app.route('/auth', authRoutes);
+  app.route('/api/share', shareAdmin);
   app.route('/api/users', userRoutes);
   app.route('/api/accounts', accountRoutes);
   app.route('/api/files', fileRoutes);

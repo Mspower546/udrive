@@ -71,6 +71,16 @@ const PERMISSION_GROUPS = [
       { key: 'admin:manage_api', label: 'Manage API Keys' },
       { key: 'admin:view_api_docs', label: 'View API Docs' }
     ]
+  },
+  {
+    key: 'share',
+    label: 'File Share',
+    icon: 'share',
+    permissions: [
+      { key: 'share:view', label: 'View Shares' },
+      { key: 'share:manage', label: 'Manage Shares (delete/cleanup)' },
+      { key: 'share:settings', label: 'Share Settings' }
+    ]
   }
 ];
 

@@ -15,6 +15,8 @@ import { renderLogsPage } from './pages/logs.js';
 import { renderTransferPage } from './pages/transfer.js';
 import { renderApiAccessPage } from './pages/api-access.js';
 import { renderApiDocsPage } from './pages/api-docs.js';
+import { renderSharePublicPage } from './pages/share-public.js';
+import { renderFileSharePage } from './pages/file-share.js';
 import { showLogoutModal } from './components/logout-modal.js';
 import { api } from './api.js';
 import { setCurrentUser, hasPermission, hasPageAccess, getCurrentUser } from './auth-state.js';
@@ -23,6 +25,21 @@ import { loadTimeSettings } from './time-utils.js';
 initTheme();
 
 async function initApp() {
+  // Public share routes bypass auth
+  const hash = window.location.hash.slice(1) || '/';
+  if (hash === '/share' || hash.startsWith('/share/')) {
+    renderSharePublicPage();
+    window.addEventListener('hashchange', () => {
+      const h = window.location.hash.slice(1) || '/';
+      if (h === '/share' || h.startsWith('/share/')) {
+        renderSharePublicPage();
+      } else {
+        window.location.reload();
+      }
+    });
+    return;
+  }
+
   try {
     const { initialized } = await api('/api/users/check');
 
@@ -98,6 +115,10 @@ async function initApp() {
     registerRoute('/api-docs', () => {
       if (!hasPermission('admin:view_api_docs') && getCurrentUser()?.role !== 'master') { navigate('/'); return; }
       renderApiDocsPage();
+    });
+    registerRoute('/file-share', () => {
+      if (!hasPageAccess('share')) { navigate('/'); return; }
+      renderFileSharePage();
     });
     registerRoute('/login', renderLoginPage);
 

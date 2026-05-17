@@ -101,6 +101,29 @@ export async function initDB(db) {
       request_count INTEGER DEFAULT 0,
       PRIMARY KEY (key_hash, window_start)
     );
+
+    CREATE TABLE IF NOT EXISTS shared_files (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      share_id TEXT NOT NULL UNIQUE,
+      file_name TEXT NOT NULL,
+      file_size INTEGER NOT NULL,
+      mime_type TEXT DEFAULT 'application/octet-stream',
+      drive_file_id TEXT NOT NULL,
+      account_id INTEGER NOT NULL,
+      password_hash TEXT,
+      expiry_days INTEGER NOT NULL,
+      expires_at TEXT NOT NULL,
+      download_count INTEGER DEFAULT 0,
+      last_accessed_at TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+    );
+
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('share_enabled', '1');
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('share_folder_id', '');
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('share_default_expiry_days', '7');
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('share_max_expiry_days', '30');
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('share_max_file_size_mb', '100');
   `);
 
   // Migrations for existing databases

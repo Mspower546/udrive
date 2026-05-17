@@ -39,6 +39,7 @@ export function updateSidebarContent(sidebar, totalUsed, totalLimit, collapsed) 
   if (isMaster || hasPermission('admin:view_logs')) navItems.push({ path: '/logs', icon: 'terminal', label: 'Logs' });
   if (isMaster || hasPermission('admin:manage_api')) navItems.push({ path: '/api-access', icon: 'vpn_key', label: 'API Access' });
   if (isMaster || hasPermission('admin:view_api_docs')) navItems.push({ path: '/api-docs', icon: 'menu_book', label: 'API Docs' });
+  if (hasPageAccess('share')) navItems.push({ path: '/file-share', icon: 'share', label: 'File Share' });
 
   if (collapsed) {
     const percent = totalLimit > 0 ? Math.min((totalUsed / totalLimit) * 100, 100) : 0;

@@ -7,6 +7,7 @@ import 'dotenv/config';
 import { createApp } from './app.js';
 import { getDB, initDB } from './db/index.js';
 import { runKeepAlive } from './services/keep-alive.js';
+import { cleanupExpiredShares } from './services/share-cleanup.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const distPath = join(__dirname, '..', 'dist');
@@ -47,3 +48,7 @@ if (days > 0) {
   setInterval(() => runKeepAlive(env, db), days * 24 * 60 * 60 * 1000);
   console.log(`Keep-alive scheduler started: every ${days} day(s)`);
 }
+
+// Share cleanup scheduler (hourly)
+const shareEnv = { GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET };
+setInterval(() => cleanupExpiredShares(shareEnv, db).catch(() => {}), 60 * 60 * 1000);
