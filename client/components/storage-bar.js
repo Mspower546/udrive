@@ -1,7 +1,9 @@
 function formatStorage(bytes) {
-  if (bytes < 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
-  if (bytes < 1024 ** 3) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-  return (bytes / (1024 ** 3)).toFixed(2) + ' GB';
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
 export function renderStorageBar(used, limit, fileCount = null) {
