@@ -52,7 +52,7 @@ async function checkUploadRateLimit(db, ip) {
 }
 
 async function getShareSettings(db) {
-  const keys = ['share_enabled', 'share_folder_id', 'share_default_expiry_days', 'share_max_expiry_days', 'share_max_file_size_mb', 'share_cleanup_interval_minutes'];
+  const keys = ['share_enabled', 'share_folder_id', 'share_default_expiry_days', 'share_max_expiry_days', 'share_max_file_size_mb', 'share_cleanup_interval_minutes', 'share_rate_limit_per_hour'];
   const settings = {};
   for (const key of keys) {
     const row = await db.prepare('SELECT value FROM settings WHERE key = ?').bind(key).first();
@@ -381,7 +381,7 @@ shareAdmin.put('/settings', async (c) => {
 
   const db = c.get('db');
   const body = await c.req.json();
-  const allowed = ['share_enabled', 'share_folder_id', 'share_default_expiry_days', 'share_max_expiry_days', 'share_max_file_size_mb', 'share_cleanup_interval_minutes'];
+  const allowed = ['share_enabled', 'share_folder_id', 'share_default_expiry_days', 'share_max_expiry_days', 'share_max_file_size_mb', 'share_cleanup_interval_minutes', 'share_rate_limit_per_hour'];
 
   for (const [key, value] of Object.entries(body)) {
     if (allowed.includes(key)) {

@@ -434,37 +434,60 @@ async function renderSettingsTab(container) {
     const settings = await api('/api/share/settings');
 
     container.innerHTML = `
-      <div class="max-w-lg space-y-4">
-        <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-          <div>
-            <p class="text-sm font-medium">Enable File Sharing</p>
-            <p class="text-xs text-gray-500">Allow public file uploads</p>
+      <div class="max-w-lg space-y-6">
+        <!-- General -->
+        <div class="space-y-4">
+          <h3 class="text-sm font-semibold text-gray-800 dark:text-gray-200">General</h3>
+          <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+            <div>
+              <p class="text-sm font-medium">Enable File Sharing</p>
+              <p class="text-xs text-gray-500">Allow public file uploads</p>
+            </div>
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input type="checkbox" id="share-enabled" class="sr-only peer" ${settings.share_enabled === '1' ? 'checked' : ''}>
+              <div class="w-9 h-5 bg-gray-300 peer-focus:ring-2 peer-focus:ring-blue-300 rounded-full peer dark:bg-gray-600 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+            </label>
           </div>
-          <label class="relative inline-flex items-center cursor-pointer">
-            <input type="checkbox" id="share-enabled" class="sr-only peer" ${settings.share_enabled === '1' ? 'checked' : ''}>
-            <div class="w-9 h-5 bg-gray-300 peer-focus:ring-2 peer-focus:ring-blue-300 rounded-full peer dark:bg-gray-600 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
-          </label>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Share Folder ID</label>
+            <input type="text" id="share-folder-id" value="${escapeHtml(settings.share_folder_id || '')}" placeholder="Google Drive folder ID for shared files" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none">
+            <p class="text-xs text-gray-400 mt-1">Dedicated folder where shared files are stored</p>
+          </div>
         </div>
 
-        <div>
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Share Folder ID</label>
-          <input type="text" id="share-folder-id" value="${escapeHtml(settings.share_folder_id || '')}" placeholder="Google Drive folder ID for shared files" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none">
-          <p class="text-xs text-gray-400 mt-1">Dedicated folder where shared files are stored</p>
+        <!-- Expiry -->
+        <div class="space-y-4">
+          <h3 class="text-sm font-semibold text-gray-800 dark:text-gray-200">Expiry</h3>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Default (days)</label>
+              <input type="number" id="share-default-expiry" value="${settings.share_default_expiry_days || '7'}" min="1" max="365" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none">
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Maximum (days)</label>
+              <input type="number" id="share-max-expiry" value="${settings.share_max_expiry_days || '30'}" min="1" max="365" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none">
+            </div>
+          </div>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Default Expiry (days)</label>
-            <input type="number" id="share-default-expiry" value="${settings.share_default_expiry_days || '7'}" min="1" max="365" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none">
+        <!-- Limits -->
+        <div class="space-y-4">
+          <h3 class="text-sm font-semibold text-gray-800 dark:text-gray-200">Limits</h3>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Max File Size (MB)</label>
+              <input type="number" id="share-max-size" value="${settings.share_max_file_size_mb || '100'}" min="1" max="4096" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none">
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Rate Limit (uploads/hour/IP)</label>
+              <input type="number" id="share-rate-limit" value="${settings.share_rate_limit_per_hour || '10'}" min="1" max="1000" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none">
+            </div>
           </div>
-          <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Max Expiry (days)</label>
-            <input type="number" id="share-max-expiry" value="${settings.share_max_expiry_days || '30'}" min="1" max="365" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none">
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Max File Size (MB)</label>
-            <input type="number" id="share-max-size" value="${settings.share_max_file_size_mb || '100'}" min="1" max="4096" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none">
-          </div>
+        </div>
+
+        <!-- Maintenance -->
+        <div class="space-y-4">
+          <h3 class="text-sm font-semibold text-gray-800 dark:text-gray-200">Maintenance</h3>
           <div>
             <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Cleanup Interval (minutes)</label>
             <input type="number" id="share-cleanup-interval" value="${settings.share_cleanup_interval_minutes || '60'}" min="1" max="1440" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none">
@@ -495,7 +518,8 @@ async function renderSettingsTab(container) {
             share_default_expiry_days: container.querySelector('#share-default-expiry').value,
             share_max_expiry_days: container.querySelector('#share-max-expiry').value,
             share_max_file_size_mb: container.querySelector('#share-max-size').value,
-            share_cleanup_interval_minutes: container.querySelector('#share-cleanup-interval').value
+            share_cleanup_interval_minutes: container.querySelector('#share-cleanup-interval').value,
+            share_rate_limit_per_hour: container.querySelector('#share-rate-limit').value
           })
         });
         msgEl.textContent = 'Settings saved';
