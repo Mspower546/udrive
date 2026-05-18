@@ -328,7 +328,7 @@ export function renderSettingsPage() {
     main.querySelector('#import-db-input').click();
   });
 
-  main.querySelector('#import-db-input').addEventListener('change', async (e) => {
+  main.querySelector('#import-db-input')?.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
     e.target.value = '';
