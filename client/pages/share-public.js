@@ -126,8 +126,21 @@ async function renderUploadPage(main) {
           <p id="error-text" class="text-sm text-red-600 dark:text-red-400"></p>
         </div>
 
-        <div class="mt-6 text-center">
-          <a href="#/login" class="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400">Admin Login</a>
+        <div class="mt-6">
+          <button id="login-toggle" class="w-full flex items-center justify-center gap-1 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 transition-colors">
+            <span>Admin Login</span>
+            <span class="material-icons-outlined text-base login-chevron">expand_more</span>
+          </button>
+          <div id="login-form" class="hidden mt-3 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg space-y-3">
+            <div>
+              <input type="text" id="login-username" placeholder="Username" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none">
+            </div>
+            <div>
+              <input type="password" id="login-password" placeholder="Password" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none">
+            </div>
+            <p id="login-error" class="text-xs text-red-500 hidden"></p>
+            <button id="login-btn" class="w-full py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">Login</button>
+          </div>
         </div>
       </div>
     </div>
@@ -255,6 +268,57 @@ async function renderUploadPage(main) {
     main.querySelector('#error-text').textContent = msg;
     el.classList.remove('hidden');
   }
+
+  // Login toggle
+  main.querySelector('#login-toggle').addEventListener('click', () => {
+    const form = main.querySelector('#login-form');
+    const chevron = main.querySelector('.login-chevron');
+    form.classList.toggle('hidden');
+    chevron.textContent = form.classList.contains('hidden') ? 'expand_more' : 'expand_less';
+  });
+
+  main.querySelector('#login-btn').addEventListener('click', async () => {
+    const username = main.querySelector('#login-username').value.trim();
+    const password = main.querySelector('#login-password').value;
+    const errEl = main.querySelector('#login-error');
+    errEl.classList.add('hidden');
+
+    if (!username || !password) {
+      errEl.textContent = 'Username and password required';
+      errEl.classList.remove('hidden');
+      return;
+    }
+
+    const btn = main.querySelector('#login-btn');
+    btn.disabled = true;
+    btn.textContent = 'Logging in...';
+
+    try {
+      const res = await fetch('/api/users/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        errEl.textContent = data.error || 'Login failed';
+        errEl.classList.remove('hidden');
+      } else {
+        window.location.hash = '/';
+        window.location.reload();
+      }
+    } catch {
+      errEl.textContent = 'Network error';
+      errEl.classList.remove('hidden');
+    }
+
+    btn.disabled = false;
+    btn.textContent = 'Login';
+  });
+
+  main.querySelector('#login-password').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') main.querySelector('#login-btn').click();
+  });
 }
 
 async function renderDownloadPage(main, shareId) {

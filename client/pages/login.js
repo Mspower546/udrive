@@ -14,12 +14,161 @@ export function renderLoginPage() {
   document.getElementById('mobile-nav')?.classList.add('hidden');
   document.getElementById('topbar-storage-donut')?.classList.add('hidden');
 
+  // Check share status first to decide layout
+  initLoginLayout(main);
+}
+
+async function initLoginLayout(main) {
+  let shareInfo;
+  try {
+    const res = await fetch('/share/info');
+    shareInfo = await res.json();
+  } catch {
+    shareInfo = { enabled: false };
+  }
+
+  if (!shareInfo.enabled) {
+    renderLoginOnly(main);
+  } else {
+    renderUploadWithLogin(main, shareInfo);
+  }
+}
+
+function showLoginModal(main) {
+  const existing = document.getElementById('login-modal');
+  if (existing) { existing.classList.remove('hidden'); return; }
+
+  const modal = document.createElement('div');
+  modal.id = 'login-modal';
+  modal.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4';
+  modal.innerHTML = `
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-sm p-6 relative">
+      <button id="login-modal-close" class="absolute top-3 right-3 p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+        <span class="material-icons-outlined text-xl">close</span>
+      </button>
+      <div class="text-center mb-5">
+        <span class="material-icons-outlined text-blue-600 text-4xl">cloud</span>
+        <h2 class="text-xl font-bold mt-2">UDrive</h2>
+        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Sign in to continue</p>
+      </div>
+      <form id="login-modal-form" class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Username</label>
+          <input type="text" id="login-modal-username" required autocomplete="username" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Password</label>
+          <input type="password" id="login-modal-password" required autocomplete="current-password" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none">
+        </div>
+        <p id="login-modal-error" class="text-sm text-red-500 hidden"></p>
+        <button type="submit" id="login-modal-btn" class="w-full py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors text-sm">
+          Sign In
+        </button>
+      </form>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  modal.querySelector('#login-modal-close').addEventListener('click', () => modal.classList.add('hidden'));
+  modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.add('hidden'); });
+
+  modal.querySelector('#login-modal-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = modal.querySelector('#login-modal-btn');
+    const errEl = modal.querySelector('#login-modal-error');
+    errEl.classList.add('hidden');
+
+    const username = modal.querySelector('#login-modal-username').value.trim();
+    const password = modal.querySelector('#login-modal-password').value;
+
+    btn.disabled = true;
+    btn.textContent = 'Signing in...';
+
+    try {
+      await api('/api/users/login', { method: 'POST', body: JSON.stringify({ username, password }) });
+      modal.remove();
+      window.location.hash = '#/';
+      window.location.reload();
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.classList.remove('hidden');
+      btn.disabled = false;
+      btn.textContent = 'Sign In';
+    }
+  });
+
+  modal.querySelector('#login-modal-username').focus();
+}
+
+function renderLoginOnly(main) {
+  document.getElementById('btn-login-topbar')?.classList.add('hidden');
+
+  main.innerHTML = `
+    <div class="flex items-center justify-center min-h-[calc(100vh-3rem)] p-4">
+      <div class="w-full max-w-sm">
+        <div class="text-center mb-6">
+          <span class="material-icons-outlined text-blue-600 text-5xl">cloud</span>
+          <h1 class="text-2xl font-bold mt-2">UDrive</h1>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Sign in to continue</p>
+        </div>
+        <form id="login-form" class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Username</label>
+            <input type="text" id="login-username" required autocomplete="username" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Password</label>
+            <input type="password" id="login-password" required autocomplete="current-password" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none">
+          </div>
+          <p id="login-error" class="text-sm text-red-500 hidden"></p>
+          <button type="submit" id="login-btn" class="w-full py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors text-sm">
+            Sign In
+          </button>
+        </form>
+      </div>
+    </div>
+  `;
+
+  main.querySelector('#login-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = main.querySelector('#login-btn');
+    const errorEl = main.querySelector('#login-error');
+    errorEl.classList.add('hidden');
+
+    const username = main.querySelector('#login-username').value.trim();
+    const password = main.querySelector('#login-password').value;
+
+    btn.disabled = true;
+    btn.textContent = 'Signing in...';
+
+    try {
+      await api('/api/users/login', { method: 'POST', body: JSON.stringify({ username, password }) });
+      window.location.hash = '#/';
+      window.location.reload();
+    } catch (err) {
+      errorEl.textContent = err.message;
+      errorEl.classList.remove('hidden');
+      btn.disabled = false;
+      btn.textContent = 'Sign In';
+    }
+  });
+}
+
+function renderUploadWithLogin(main, shareInfo) {
+  // Show login button in topbar on mobile
+  const loginTopbar = document.getElementById('btn-login-topbar');
+  if (loginTopbar) {
+    loginTopbar.classList.remove('hidden');
+    loginTopbar.classList.add('md:hidden');
+    loginTopbar.onclick = () => showLoginModal(main);
+  }
+
   main.innerHTML = `
     <div class="flex items-center justify-center min-h-[calc(100vh-3rem)] p-4">
       <div class="w-full max-w-4xl flex flex-col md:flex-row gap-8 md:gap-0 items-center md:items-center justify-center">
 
         <!-- Left: Upload Section -->
-        <div class="w-full max-w-sm order-2 md:order-1 flex flex-col items-center">
+        <div class="w-full max-w-sm order-1 md:order-1 flex flex-col items-center">
           <div class="w-full">
             <div class="text-center mb-4">
               <span class="material-icons-outlined text-blue-600 text-4xl">cloud_upload</span>
@@ -30,7 +179,7 @@ export function renderLoginPage() {
             <div id="login-upload-zone" class="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-6 text-center cursor-pointer hover:border-blue-400 dark:hover:border-blue-500 transition-colors">
               <span class="material-icons-outlined text-3xl text-gray-400">upload_file</span>
               <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">Drag & drop or click to browse</p>
-              <p id="login-upload-max" class="mt-1 text-xs text-gray-400"></p>
+              <p id="login-upload-max" class="mt-1 text-xs text-gray-400">Max ${shareInfo.maxFileSizeMb}MB</p>
               <input type="file" id="login-file-input" class="hidden">
             </div>
 
@@ -86,10 +235,6 @@ export function renderLoginPage() {
             <div id="login-upload-error" class="hidden mt-3 p-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
               <p id="login-error-upload-text" class="text-xs text-red-600 dark:text-red-400"></p>
             </div>
-
-            <div id="login-share-disabled" class="hidden text-center mt-3">
-              <p class="text-xs text-gray-400">File sharing is currently disabled</p>
-            </div>
           </div>
         </div>
 
@@ -99,14 +244,9 @@ export function renderLoginPage() {
           <span class="py-3 text-xs text-gray-400">or</span>
           <div class="flex-1 w-px bg-gray-200 dark:bg-gray-700"></div>
         </div>
-        <div class="flex md:hidden items-center gap-3 w-full max-w-sm order-2">
-          <div class="flex-1 h-px bg-gray-200 dark:bg-gray-700"></div>
-          <span class="text-xs text-gray-400">or</span>
-          <div class="flex-1 h-px bg-gray-200 dark:bg-gray-700"></div>
-        </div>
 
-        <!-- Right: Login Section -->
-        <div class="w-full max-w-sm order-1 md:order-3 flex flex-col items-center">
+        <!-- Right: Login Section (desktop only) -->
+        <div class="w-full max-w-sm hidden md:flex order-3 flex-col items-center">
           <div class="w-full">
             <div class="text-center mb-6">
               <span class="material-icons-outlined text-blue-600 text-5xl">cloud</span>
@@ -134,8 +274,8 @@ export function renderLoginPage() {
     </div>
   `;
 
-  // Login form handler
-  main.querySelector('#login-form').addEventListener('submit', async (e) => {
+  // Login form handler (desktop)
+  main.querySelector('#login-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const btn = main.querySelector('#login-btn');
     const errorEl = main.querySelector('#login-error');
@@ -160,26 +300,10 @@ export function renderLoginPage() {
   });
 
   // Upload section
-  initLoginUpload(main);
+  initLoginUpload(main, shareInfo);
 }
 
-async function initLoginUpload(main) {
-  let shareInfo;
-  try {
-    const res = await fetch('/share/info');
-    shareInfo = await res.json();
-  } catch {
-    shareInfo = { enabled: false };
-  }
-
-  if (!shareInfo.enabled) {
-    main.querySelector('#login-upload-zone').classList.add('hidden');
-    main.querySelector('#login-upload-btn').classList.add('hidden');
-    main.querySelector('#login-upload-options').classList.add('hidden');
-    main.querySelector('#login-share-disabled').classList.remove('hidden');
-    return;
-  }
-
+async function initLoginUpload(main, shareInfo) {
   main.querySelector('#login-upload-max').textContent = `Max ${shareInfo.maxFileSizeMb}MB`;
 
   // Populate expiry options
