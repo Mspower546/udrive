@@ -49,6 +49,16 @@ if (days > 0) {
   console.log(`Keep-alive scheduler started: every ${days} day(s)`);
 }
 
-// Share cleanup scheduler (hourly)
+// Share cleanup scheduler (configurable interval)
 const shareEnv = { GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET };
-setInterval(() => cleanupExpiredShares(shareEnv, db).catch(() => {}), 60 * 60 * 1000);
+const cleanupSetting = await db.prepare("SELECT value FROM settings WHERE key = 'share_cleanup_interval_minutes'").first();
+const cleanupMinutes = Math.max(1, parseInt(cleanupSetting?.value) || 60);
+cleanupExpiredShares(shareEnv, db)
+  .then(count => { if (count > 0) console.log(`Share cleanup (initial): removed ${count} expired file(s)`); })
+  .catch(() => {});
+setInterval(() => {
+  cleanupExpiredShares(shareEnv, db)
+    .then(count => { if (count > 0) console.log(`Share cleanup (scheduled): removed ${count} expired file(s)`); })
+    .catch(() => {});
+}, cleanupMinutes * 60 * 1000);
+console.log(`Share cleanup scheduler started: every ${cleanupMinutes} minute(s)`);

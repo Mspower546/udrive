@@ -185,6 +185,18 @@ export async function getFileInfo(env, db, accountId, fileId) {
   return res.json();
 }
 
+export async function checkFileExists(env, db, accountId, fileId) {
+  try {
+    const headers = await getAuthHeaders(env, db, accountId);
+    const res = await fetch(`${DRIVE_API}/files/${fileId}?fields=id,trashed`, { headers });
+    if (!res.ok) return false;
+    const data = await res.json();
+    return !data.trashed;
+  } catch {
+    return false;
+  }
+}
+
 export async function listTrash(env, db, accountId) {
   const headers = await getAuthHeaders(env, db, accountId);
   const q = encodeURIComponent('trashed = true');

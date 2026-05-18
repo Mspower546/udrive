@@ -124,6 +124,8 @@ export async function initDB(db) {
     INSERT OR IGNORE INTO settings (key, value) VALUES ('share_default_expiry_days', '7');
     INSERT OR IGNORE INTO settings (key, value) VALUES ('share_max_expiry_days', '30');
     INSERT OR IGNORE INTO settings (key, value) VALUES ('share_max_file_size_mb', '100');
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('share_allowed_accounts', '[]');
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('share_cleanup_interval_minutes', '60');
   `);
 
   // Migrations for existing databases

@@ -1,10 +1,11 @@
 import { Hono } from 'hono';
 import { uploadFile, downloadFile, permanentDeleteFile } from '../services/google-drive.js';
-import { selectAccount } from '../services/account-selector.js';
+import { selectShareAccount } from '../services/account-selector.js';
 import { hashPassword, verifyPassword } from '../services/password.js';
 import { logSystem } from '../services/logger.js';
 import { cleanupExpiredShares } from '../services/share-cleanup.js';
 import { requireAuth, requirePermission } from '../middleware/auth.js';
+import { addClient, removeClient, broadcast } from '../services/share-events.js';
 
 function generateShareId() {
   const array = new Uint8Array(6);
@@ -13,7 +14,7 @@ function generateShareId() {
 }
 
 async function getShareSettings(db) {
-  const keys = ['share_enabled', 'share_folder_id', 'share_default_expiry_days', 'share_max_expiry_days', 'share_max_file_size_mb'];
+  const keys = ['share_enabled', 'share_folder_id', 'share_default_expiry_days', 'share_max_expiry_days', 'share_max_file_size_mb', 'share_cleanup_interval_minutes'];
   const settings = {};
   for (const key of keys) {
     const row = await db.prepare('SELECT value FROM settings WHERE key = ?').bind(key).first();
@@ -67,7 +68,7 @@ sharePublic.post('/upload', async (c) => {
 
   const password = formData.get('password') || null;
 
-  const account = await selectAccount(db, file.size);
+  const account = await selectShareAccount(db, file.size);
   if (!account) {
     return c.json({ error: 'No storage space available' }, 507);
   }
@@ -88,6 +89,19 @@ sharePublic.post('/upload', async (c) => {
   ).bind(shareId, file.name, file.size, file.type || 'application/octet-stream', driveFile.id, account.id, passwordHash, expiryDays, expiresAt).run();
 
   await logSystem(db, 'info', 'File shared', `${file.name} (${shareId})`);
+
+  broadcast('share-created', {
+    id: null,
+    shareId,
+    fileName: file.name,
+    fileSize: file.size,
+    hasPassword: !!password,
+    expiryDays,
+    expiresAt,
+    downloadCount: 0,
+    lastAccessedAt: null,
+    createdAt: new Date().toISOString().replace('T', ' ').slice(0, 19)
+  });
 
   // Lazy cleanup
   cleanupExpiredShares(c.env, db, 5).catch(() => {});
@@ -111,6 +125,7 @@ sharePublic.get('/:shareId', async (c) => {
   if (new Date(file.expires_at) < new Date()) {
     try { await permanentDeleteFile(c.env, db, file.account_id, file.drive_file_id); } catch {}
     await db.prepare('DELETE FROM shared_files WHERE id = ?').bind(file.id).run();
+    broadcast('share-deleted', { shareId });
     return c.json({ error: 'Share has expired' }, 410);
   }
 
@@ -164,6 +179,7 @@ sharePublic.get('/:shareId/download', async (c) => {
   if (new Date(file.expires_at) < new Date()) {
     try { await permanentDeleteFile(c.env, db, file.account_id, file.drive_file_id); } catch {}
     await db.prepare('DELETE FROM shared_files WHERE id = ?').bind(file.id).run();
+    broadcast('share-deleted', { shareId });
     return c.json({ error: 'Share has expired' }, 410);
   }
 
@@ -182,6 +198,8 @@ sharePublic.get('/:shareId/download', async (c) => {
     'UPDATE shared_files SET download_count = download_count + 1, last_accessed_at = datetime(\'now\'), expires_at = ? WHERE id = ?'
   ).bind(newExpiresAt, file.id).run();
 
+  broadcast('share-downloaded', { shareId, downloadCount: file.download_count + 1, expiresAt: newExpiresAt });
+
   return new Response(body, {
     headers: {
       'Content-Type': file.mime_type || 'application/octet-stream',
@@ -193,6 +211,32 @@ sharePublic.get('/:shareId/download', async (c) => {
 
 // Admin routes (mounted under /api/share, auth applied by app.js)
 const shareAdmin = new Hono();
+
+shareAdmin.get('/events', async (c) => {
+  const user = c.get('user');
+  const err = requireAuth(c, user) || requirePermission(c, user, 'share:view');
+  if (err) return err;
+
+  const stream = new ReadableStream({
+    start(controller) {
+      const id = addClient(controller);
+      controller.enqueue(new TextEncoder().encode(`: connected\n\n`));
+
+      c.req.raw.signal.addEventListener('abort', () => {
+        removeClient(id);
+      });
+    },
+    cancel() {}
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive'
+    }
+  });
+});
 
 shareAdmin.get('/list', async (c) => {
   const user = c.get('user');
@@ -243,6 +287,7 @@ shareAdmin.delete('/:shareId', async (c) => {
   try { await permanentDeleteFile(c.env, db, file.account_id, file.drive_file_id); } catch {}
   await db.prepare('DELETE FROM shared_files WHERE id = ?').bind(file.id).run();
 
+  broadcast('share-deleted', { shareId });
   await logSystem(db, 'info', 'Shared file deleted', `${file.file_name} (${shareId})`);
   return c.json({ success: true });
 });
@@ -264,7 +309,7 @@ shareAdmin.put('/settings', async (c) => {
 
   const db = c.get('db');
   const body = await c.req.json();
-  const allowed = ['share_enabled', 'share_folder_id', 'share_default_expiry_days', 'share_max_expiry_days', 'share_max_file_size_mb'];
+  const allowed = ['share_enabled', 'share_folder_id', 'share_default_expiry_days', 'share_max_expiry_days', 'share_max_file_size_mb', 'share_cleanup_interval_minutes'];
 
   for (const [key, value] of Object.entries(body)) {
     if (allowed.includes(key)) {
@@ -283,6 +328,53 @@ shareAdmin.post('/cleanup', async (c) => {
   const db = c.get('db');
   const count = await cleanupExpiredShares(c.env, db);
   return c.json({ cleaned: count });
+});
+
+shareAdmin.get('/accounts', async (c) => {
+  const user = c.get('user');
+  const err = requireAuth(c, user) || requirePermission(c, user, 'share:settings');
+  if (err) return err;
+
+  const db = c.get('db');
+  const { results: accounts } = await db.prepare(
+    'SELECT id, email, display_name, is_primary, storage_limit, storage_used, card_color FROM accounts ORDER BY is_primary DESC, email ASC'
+  ).all();
+
+  const setting = await db.prepare("SELECT value FROM settings WHERE key = 'share_allowed_accounts'").first();
+  let allowedIds = [];
+  if (setting?.value) {
+    try { allowedIds = JSON.parse(setting.value); } catch {}
+  }
+
+  return c.json({
+    accounts: accounts.map(a => ({
+      id: a.id,
+      email: a.email,
+      displayName: a.display_name,
+      isPrimary: !!a.is_primary,
+      storageLimit: a.storage_limit,
+      storageUsed: a.storage_used,
+      cardColor: a.card_color,
+      shareEnabled: allowedIds.length === 0 || allowedIds.includes(a.id)
+    })),
+    allowedIds
+  });
+});
+
+shareAdmin.put('/accounts', async (c) => {
+  const user = c.get('user');
+  const err = requireAuth(c, user) || requirePermission(c, user, 'share:settings');
+  if (err) return err;
+
+  const db = c.get('db');
+  const body = await c.req.json();
+  const allowedIds = body.allowedIds || [];
+
+  await db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('share_allowed_accounts', ?)")
+    .bind(JSON.stringify(allowedIds)).run();
+
+  await logSystem(db, 'info', 'Share accounts updated', `Allowed accounts: ${allowedIds.length === 0 ? 'all' : allowedIds.join(', ')}`);
+  return c.json({ success: true });
 });
 
 export { sharePublic, shareAdmin };

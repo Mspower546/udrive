@@ -16,7 +16,7 @@ import { renderTransferPage } from './pages/transfer.js';
 import { renderApiAccessPage } from './pages/api-access.js';
 import { renderApiDocsPage } from './pages/api-docs.js';
 import { renderSharePublicPage } from './pages/share-public.js';
-import { renderFileSharePage } from './pages/file-share.js';
+import { renderFileSharePage, destroyFileSharePage } from './pages/file-share.js';
 import { showLogoutModal } from './components/logout-modal.js';
 import { api } from './api.js';
 import { setCurrentUser, hasPermission, hasPageAccess, getCurrentUser } from './auth-state.js';
@@ -119,6 +119,7 @@ async function initApp() {
     registerRoute('/file-share', () => {
       if (!hasPageAccess('share')) { navigate('/'); return; }
       renderFileSharePage();
+      return destroyFileSharePage;
     });
     registerRoute('/login', renderLoginPage);
 
