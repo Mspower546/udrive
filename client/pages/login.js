@@ -164,7 +164,7 @@ function renderUploadWithLogin(main, shareInfo) {
   }
 
   main.innerHTML = `
-    <div class="flex items-center justify-center min-h-[calc(100vh-3rem)] p-4">
+    <div class="flex items-start md:items-center justify-center min-h-[calc(100vh-3rem)] p-4 pt-6 md:pt-4">
       <div class="w-full max-w-4xl flex flex-col md:flex-row gap-8 md:gap-0 items-center md:items-center justify-center">
 
         <!-- Left: Upload Section -->
