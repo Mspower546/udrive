@@ -1,6 +1,7 @@
 import { api } from '../api.js';
 import { hasPermission } from '../auth-state.js';
 import { formatDateTime } from '../time-utils.js';
+import { generateQRCode } from '../qr.js';
 
 let activeTab = 'shares';
 let eventSource = null;
@@ -234,6 +235,9 @@ function createShareRow(share) {
     <td class="py-2.5 pr-3 hidden md:table-cell expiry-cell ${isExpired ? 'text-red-500' : 'text-gray-500'}">${formatDateTime(share.expiresAt)}</td>
     <td class="py-2.5">
       <div class="flex items-center gap-1">
+        <button class="qr-btn p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800" data-share-id="${share.shareId}" title="QR Code">
+          <span class="material-icons-outlined text-sm">qr_code_2</span>
+        </button>
         <button class="copy-btn p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800" data-share-id="${share.shareId}" title="Copy link">
           <span class="material-icons-outlined text-sm">content_copy</span>
         </button>
@@ -249,6 +253,29 @@ function createShareRow(share) {
 }
 
 function bindRowEvents(tr) {
+  tr.querySelector('.qr-btn')?.addEventListener('click', () => {
+    const shareId = tr.dataset.shareId;
+    const link = `${window.location.origin}/#/share/${shareId}`;
+    const existing = document.getElementById('qr-modal');
+    if (existing) existing.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'qr-modal';
+    modal.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4';
+    modal.innerHTML = `
+      <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl p-6 max-w-xs w-full relative">
+        <button id="qr-modal-close" class="absolute top-3 right-3 p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+          <span class="material-icons-outlined text-xl">close</span>
+        </button>
+        <div class="flex justify-center mb-3">${generateQRCode(link)}</div>
+        <p class="text-xs text-center text-gray-500 break-all">${link}</p>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    modal.querySelector('#qr-modal-close').addEventListener('click', () => modal.remove());
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+  });
+
   tr.querySelector('.copy-btn')?.addEventListener('click', () => {
     const shareId = tr.dataset.shareId;
     const link = `${window.location.origin}/#/share/${shareId}`;

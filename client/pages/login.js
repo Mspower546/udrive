@@ -1,4 +1,5 @@
 import { api } from '../api.js';
+import { generateQRCode } from '../qr.js';
 
 function formatFileSize(bytes) {
   if (bytes === 0) return '0 B';
@@ -232,6 +233,7 @@ function renderUploadWithLogin(main, shareInfo) {
                 <input type="text" id="login-share-link" readonly class="flex-1 px-2 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-xs">
                 <button id="login-copy-link" class="px-2 py-1.5 bg-blue-600 text-white rounded text-xs hover:bg-blue-700">Copy</button>
               </div>
+              <div id="login-share-qr" class="flex justify-center mt-3"></div>
             </div>
 
             <div id="login-upload-error" class="hidden mt-3 p-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
@@ -427,6 +429,7 @@ async function initLoginUpload(main, shareInfo) {
       progressEl.classList.add('hidden');
       const shareLink = `${window.location.origin}/#/share/${result.shareId}`;
       main.querySelector('#login-share-link').value = shareLink;
+      main.querySelector('#login-share-qr').innerHTML = generateQRCode(shareLink);
       main.querySelector('#login-upload-result').classList.remove('hidden');
 
       main.querySelector('#login-copy-link').addEventListener('click', () => {

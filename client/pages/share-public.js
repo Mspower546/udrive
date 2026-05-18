@@ -1,4 +1,5 @@
 import { initTheme } from '../theme.js';
+import { generateQRCode } from '../qr.js';
 
 function formatFileSize(bytes) {
   if (bytes === 0) return '0 B';
@@ -122,6 +123,7 @@ async function renderUploadPage(main) {
             <button id="copy-link" class="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">Copy</button>
           </div>
           <p id="share-expiry" class="text-xs text-gray-500 mt-2"></p>
+          <div id="share-qr" class="flex justify-center mt-3"></div>
         </div>
 
         <div id="upload-error" class="hidden mt-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
@@ -259,6 +261,7 @@ async function renderUploadPage(main) {
       const shareLink = `${window.location.origin}/#/share/${result.shareId}`;
       main.querySelector('#share-link').value = shareLink;
       main.querySelector('#share-expiry').textContent = `Expires: ${new Date(result.expiresAt).toLocaleDateString()}`;
+      main.querySelector('#share-qr').innerHTML = generateQRCode(shareLink);
       resultEl.classList.remove('hidden');
 
       main.querySelector('#copy-link').addEventListener('click', () => {
