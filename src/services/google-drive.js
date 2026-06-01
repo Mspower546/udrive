@@ -44,6 +44,38 @@ export async function uploadFile(env, db, accountId, folderId, fileBuffer, metad
   return res.json();
 }
 
+// === DIRECT-TO-GOOGLE RESUMABLE UPLOAD ===
+// Worker sirf ek "session URL" banata hai. Browser is URL par file ke bytes
+// seedhe Google ko bhejta hai (Cloudflare ke beech aaye bina).
+// Isse Cloudflare ki 100MB / 128MB RAM limit lagti hi nahi.
+export async function createResumableUpload(env, db, accountId, folderId, fileName, mimeType, fileSize) {
+  const headers = await getAuthHeaders(env, db, accountId);
+
+  const metadata = JSON.stringify({ name: fileName, parents: [folderId] });
+
+  const res = await fetch(`${UPLOAD_API}/files?uploadType=resumable&fields=id,name,mimeType,size`, {
+    method: 'POST',
+    headers: {
+      ...headers,
+      'Content-Type': 'application/json; charset=UTF-8',
+      'X-Upload-Content-Type': mimeType || 'application/octet-stream',
+      ...(fileSize ? { 'X-Upload-Content-Length': String(fileSize) } : {})
+    },
+    body: metadata
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(`Resumable session create failed: ${res.status} ${errText}`);
+  }
+
+  // Google session URL "Location" header mein deta hai. Browser isi par file bhejega.
+  const uploadUrl = res.headers.get('Location') || res.headers.get('location');
+  if (!uploadUrl) throw new Error('No upload URL returned by Google');
+
+  return { uploadUrl };
+}
+
 export async function downloadFile(env, db, accountId, fileId) {
   const headers = await getAuthHeaders(env, db, accountId);
   const metaRes = await fetch(`${DRIVE_API}/files/${fileId}?fields=name,mimeType,size`, { headers });
