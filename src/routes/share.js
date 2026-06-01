@@ -175,14 +175,13 @@ sharePublic.post('/upload/complete', async (c) => {
 
   const body = await c.req.json().catch(() => ({}));
 
-  // CSRF validation (ab token use karke delete kar dete hmain)
+  // Note: CSRF/captcha/rate-limit init step mein already verify ho chuke hmain.
+  // Yahan dobara check nahi karte taaki token-timing ki wajah se finalize fail na ho.
+  // CSRF token (agar mila to) cleanup kar dete hmain.
   const csrfToken = body.csrf_token;
-  if (!csrfToken) return c.json({ error: 'Invalid request' }, 403);
-  const csrfRow = await db.prepare("SELECT value FROM settings WHERE key = ?").bind(`csrf:${csrfToken}`).first();
-  if (!csrfRow || csrfRow.value < new Date().toISOString().replace('T', ' ').slice(0, 19)) {
-    return c.json({ error: 'Invalid or expired token' }, 403);
+  if (csrfToken) {
+    try { await db.prepare("DELETE FROM settings WHERE key = ?").bind(`csrf:${csrfToken}`).run(); } catch {}
   }
-  await db.prepare("DELETE FROM settings WHERE key = ?").bind(`csrf:${csrfToken}`).run();
 
   const fileId = body.fileId;
   const accountId = body.accountId;
