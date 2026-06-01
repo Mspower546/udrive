@@ -44,6 +44,16 @@ export async function uploadFile(env, db, accountId, folderId, fileBuffer, metad
   return res.json();
 }
 
+// Browser ko thodi der ke liye access token deta hai, taaki browser KHUD
+// resumable session bana sake (CORS sahi tabhi milta hai jab session browser
+// ke XHR se bane). Token sirf is account ke liye, ~1 ghante valid hota hai.
+export async function getAccessTokenForBrowser(env, db, accountId) {
+  let account = await db.prepare('SELECT * FROM accounts WHERE id = ?').bind(accountId).first();
+  if (!account) throw new Error('Account not found');
+  account = await refreshTokenIfNeeded(env, db, account);
+  return account.access_token;
+}
+
 // === DIRECT-TO-GOOGLE RESUMABLE UPLOAD ===
 // Worker sirf ek "session URL" banata hai. Browser is URL par file ke bytes
 // seedhe Google ko bhejta hai (Cloudflare ke beech aaye bina).
