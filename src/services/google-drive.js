@@ -86,6 +86,17 @@ export async function createResumableUpload(env, db, accountId, folderId, fileNa
   return { uploadUrl };
 }
 
+// Tez download ke liye: sirf media stream laata hai (metadata call NAHI),
+// kyunki Quick Share ke paas naam/size/type DB mein already hota hai.
+// Isse download button dabate hi turant shuru ho jaata hai.
+export async function downloadFileStream(env, db, accountId, fileId, rangeHeader) {
+  const headers = await getAuthHeaders(env, db, accountId);
+  const fetchHeaders = rangeHeader ? { ...headers, Range: rangeHeader } : headers;
+  const streamRes = await fetch(`${DRIVE_API}/files/${fileId}?alt=media`, { headers: fetchHeaders });
+  if (!streamRes.ok && streamRes.status !== 206) throw new Error('File download failed');
+  return { body: streamRes.body, status: streamRes.status, headers: streamRes.headers };
+}
+
 export async function downloadFile(env, db, accountId, fileId) {
   const headers = await getAuthHeaders(env, db, accountId);
   const metaRes = await fetch(`${DRIVE_API}/files/${fileId}?fields=name,mimeType,size`, { headers });
