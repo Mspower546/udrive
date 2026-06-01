@@ -223,7 +223,7 @@ export async function uploadToGoogle(progressItem, file, accessToken, folderId, 
   });
 
   // File ko us session URL par PUT karo (progress ke saath)
-  const driveFile = await new Promise((resolve, reject) => {
+  let driveFile = await new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     if (progressItem) progressItem._xhr = xhr;
 
@@ -253,17 +253,32 @@ export async function uploadToGoogle(progressItem, file, accessToken, folderId, 
         try { resolve(JSON.parse(xhr.responseText)); }
         catch { resolve({ id: 'unknown' }); }
       } else {
-        reject(new Error(`Upload failed: ${xhr.status}`));
+        // 308 ya koi aur — neeche status check karke confirm karenge
+        resolve(null);
       }
     });
 
-    xhr.addEventListener('error', () => reject(new Error('Network error')));
+    // Network error par bhi reject NAHI karte — neeche status check karenge
+    xhr.addEventListener('error', () => resolve(null));
     xhr.addEventListener('abort', () => reject(new Error('Cancelled')));
 
     xhr.open('PUT', uploadUrl);
     xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
     xhr.send(file);
   });
+
+  // Agar response saaf nahi mila, Google se poochho ki file poori pahuchi ya nahi
+  if (!driveFile || !driveFile.id) {
+    try {
+      const stRes = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Range': `bytes */${file.size}` }
+      });
+      if (stRes.status === 200 || stRes.status === 201) {
+        try { driveFile = await stRes.json(); } catch { driveFile = { id: 'unknown' }; }
+      }
+    } catch {}
+  }
 
   return driveFile;
 }
