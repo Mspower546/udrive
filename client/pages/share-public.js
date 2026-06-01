@@ -293,19 +293,32 @@ async function renderUploadPage(main) {
     const progressText = main.querySelector('#progress-text');
     progressEl.classList.remove('hidden');
 
-    const formData = new FormData();
-    formData.append('file', selectedFile);
-    formData.append('expiry_days', main.querySelector('#expiry-select').value);
-    if (passwordToggle.checked && passwordInput.value) {
-      formData.append('password', passwordInput.value);
-    }
-    formData.append('csrf_token', shareInfo.csrfToken);
     const turnstileInput = main.querySelector('[name="cf-turnstile-response"]');
-    if (turnstileInput) formData.append('cf-turnstile-response', turnstileInput.value);
+    const password = (passwordToggle.checked && passwordInput.value) ? passwordInput.value : null;
+    const expiryDays = main.querySelector('#expiry-select').value;
 
     try {
-      const xhr = new XMLHttpRequest();
-      const result = await new Promise((resolve, reject) => {
+      // --- STEP 1: server se session URL maango (CSRF/captcha check yahin hota hai) ---
+      const initRes = await fetch('/share/upload/init', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileName: selectedFile.name,
+          fileSize: selectedFile.size,
+          mimeType: selectedFile.type || 'application/octet-stream',
+          csrf_token: shareInfo.csrfToken,
+          'cf-turnstile-response': turnstileInput ? turnstileInput.value : undefined
+        })
+      });
+      if (!initRes.ok) {
+        const d = await initRes.json().catch(() => ({}));
+        throw new Error(d.error || 'Upload failed');
+      }
+      const { uploadUrl, accountId } = await initRes.json();
+
+      // --- STEP 2: file ko SEEDHE Google par bhejo ---
+      let driveFile = await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
         xhr.upload.addEventListener('progress', (e) => {
           if (e.lengthComputable) {
             const pct = Math.round((e.loaded / e.total) * 100);
@@ -315,16 +328,49 @@ async function renderUploadPage(main) {
         });
         xhr.addEventListener('load', () => {
           if (xhr.status >= 200 && xhr.status < 300) {
-            resolve(JSON.parse(xhr.responseText));
-          } else {
-            try { reject(new Error(JSON.parse(xhr.responseText).error)); }
-            catch { reject(new Error('Upload failed')); }
-          }
+            try { resolve(JSON.parse(xhr.responseText)); } catch { resolve({}); }
+          } else { resolve(null); }
         });
-        xhr.addEventListener('error', () => reject(new Error('Network error')));
-        xhr.open('POST', '/share/upload');
-        xhr.send(formData);
+        xhr.addEventListener('error', () => resolve(null));
+        xhr.open('PUT', uploadUrl);
+        xhr.setRequestHeader('Content-Type', selectedFile.type || 'application/octet-stream');
+        xhr.send(selectedFile);
       });
+
+      // Network error / 308 par status check karke confirm karo
+      if (!driveFile || !driveFile.id) {
+        try {
+          const stRes = await fetch(uploadUrl, {
+            method: 'PUT',
+            headers: { 'Content-Range': `bytes */${selectedFile.size}` }
+          });
+          if (stRes.status === 200 || stRes.status === 201) {
+            try { driveFile = await stRes.json(); } catch { driveFile = null; }
+          }
+        } catch {}
+      }
+      if (!driveFile || !driveFile.id) throw new Error('Upload incomplete — please retry');
+
+      // --- STEP 3: server ko batao taaki share link bane ---
+      const completeRes = await fetch('/share/upload/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileId: driveFile.id,
+          accountId,
+          fileName: selectedFile.name,
+          fileSize: selectedFile.size,
+          mimeType: selectedFile.type || 'application/octet-stream',
+          expiry_days: expiryDays,
+          password,
+          csrf_token: shareInfo.csrfToken
+        })
+      });
+      if (!completeRes.ok) {
+        const d = await completeRes.json().catch(() => ({}));
+        throw new Error(d.error || 'Upload finalize failed');
+      }
+      const result = await completeRes.json();
 
       progressEl.classList.add('hidden');
       const shareLink = `${window.location.origin}/#/share/${result.shareId}`;
