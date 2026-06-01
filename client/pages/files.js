@@ -930,7 +930,9 @@ export function renderFilesPage() {
     const files = e.target.files;
     if (!files.length) return;
 
-    onUploadComplete(() => {
+    onUploadComplete(async () => {
+      // Asli storage Google se sync karo (purani + nayi sab files count hongi)
+      try { await api('/api/accounts/refresh-all-storage', { method: 'POST' }); } catch {}
       loadFiles(folderId);
       renderSidebar();
     });
@@ -1003,7 +1005,8 @@ export function renderFilesPage() {
     dropZone.classList.remove('ring-2', 'ring-blue-400', 'ring-inset');
     const files = e.dataTransfer.files;
 
-    onUploadComplete(() => {
+    onUploadComplete(async () => {
+      try { await api('/api/accounts/refresh-all-storage', { method: 'POST' }); } catch {}
       loadFiles(folderId);
       renderSidebar();
     });
@@ -1012,6 +1015,12 @@ export function renderFilesPage() {
       addToUploadQueue(file, folderId);
     }
   });
+
+  // Dashboard khulte hi ek baar asli storage sync karo (background mein, chup-chaap).
+  // Isse purani files / direct Drive par daali files bhi count ho jaati hmain.
+  api('/api/accounts/refresh-all-storage', { method: 'POST' })
+    .then(() => renderSidebar())
+    .catch(() => {});
 
   loadFiles(folderId);
 
