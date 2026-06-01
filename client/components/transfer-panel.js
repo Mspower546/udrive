@@ -213,7 +213,7 @@ export async function uploadToGoogle(progressItem, file, accessToken, folderId, 
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
         const loc = xhr.getResponseHeader('Location');
-        if (loc) resolve(loc); else reject(new Error('No upload URL from Google'));
+        if (loc) resolve(loc); else reject(new Error(`session no Location (status ${xhr.status})`));
       } else {
         reject(new Error(`Session create failed: ${xhr.status}`));
       }
@@ -223,6 +223,7 @@ export async function uploadToGoogle(progressItem, file, accessToken, folderId, 
   });
 
   // File ko us session URL par PUT karo (progress ke saath)
+  let putStatus = 0;
   let driveFile = await new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     if (progressItem) progressItem._xhr = xhr;
@@ -249,6 +250,7 @@ export async function uploadToGoogle(progressItem, file, accessToken, folderId, 
     });
 
     xhr.addEventListener('load', () => {
+      putStatus = xhr.status;
       if (xhr.status >= 200 && xhr.status < 300) {
         try { resolve(JSON.parse(xhr.responseText)); }
         catch { resolve({ id: 'unknown' }); }
@@ -267,17 +269,28 @@ export async function uploadToGoogle(progressItem, file, accessToken, folderId, 
     xhr.send(file);
   });
 
-  // Agar response saaf nahi mila, Google se poochho ki file poori pahuchi ya nahi
+  // Agar response saaf nahi mila, Google se status poochho (XHR, taaki token bhej sakein)
   if (!driveFile || !driveFile.id) {
-    try {
-      const stRes = await fetch(uploadUrl, {
-        method: 'PUT',
-        headers: { 'Content-Range': `bytes */${file.size}` }
-      });
-      if (stRes.status === 200 || stRes.status === 201) {
-        try { driveFile = await stRes.json(); } catch { driveFile = { id: 'unknown' }; }
-      }
-    } catch {}
+    driveFile = await new Promise((resolve) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', uploadUrl);
+      xhr.setRequestHeader('Content-Range', `bytes */${file.size}`);
+      xhr.onload = () => {
+        if (xhr.status === 200 || xhr.status === 201) {
+          try { resolve(JSON.parse(xhr.responseText)); }
+          catch { resolve({ id: 'confirmed' }); }
+        } else {
+          resolve(null);
+        }
+      };
+      xhr.onerror = () => resolve(null);
+      xhr.send();
+    });
+  }
+
+  // Agar abhi bhi id nahi mili to status code ke saath error do
+  if (!driveFile || !driveFile.id) {
+    throw new Error(`Upload incomplete (PUT status ${putStatus}) — please retry`);
   }
 
   return driveFile;
