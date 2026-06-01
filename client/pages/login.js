@@ -1,5 +1,6 @@
 import { api } from '../api.js';
 import { generateQRCode } from '../qr.js';
+import { uploadToGoogle } from '../components/transfer-panel.js';
 
 function formatFileSize(bytes) {
   if (bytes === 0) return '0 B';
@@ -402,38 +403,61 @@ async function initLoginUpload(main, shareInfo) {
     const progressText = main.querySelector('#login-progress-text');
     progressEl.classList.remove('hidden');
 
-    const formData = new FormData();
-    formData.append('file', selectedFile);
-    formData.append('expiry_days', main.querySelector('#login-expiry-select').value);
-    if (passwordToggle.checked && passwordInput.value) {
-      formData.append('password', passwordInput.value);
-    }
-    formData.append('csrf_token', shareInfo.csrfToken);
     const turnstileInput = main.querySelector('[name="cf-turnstile-response"]');
-    if (turnstileInput) formData.append('cf-turnstile-response', turnstileInput.value);
+    const password = (passwordToggle.checked && passwordInput.value) ? passwordInput.value : null;
+    const expiryDays = main.querySelector('#login-expiry-select').value;
 
     try {
-      const xhr = new XMLHttpRequest();
-      const result = await new Promise((resolve, reject) => {
-        xhr.upload.addEventListener('progress', (e) => {
-          if (e.lengthComputable) {
-            const pct = Math.round((e.loaded / e.total) * 100);
-            progressBar.style.width = pct + '%';
-            progressText.textContent = pct + '%';
-          }
-        });
-        xhr.addEventListener('load', () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            resolve(JSON.parse(xhr.responseText));
-          } else {
-            try { reject(new Error(JSON.parse(xhr.responseText).error)); }
-            catch { reject(new Error('Upload failed')); }
-          }
-        });
-        xhr.addEventListener('error', () => reject(new Error('Network error')));
-        xhr.open('POST', '/share/upload');
-        xhr.send(formData);
+      // STEP 1: server se token + folder maango (CSRF/captcha yahin check)
+      const initRes = await fetch('/share/upload/init', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileName: selectedFile.name,
+          fileSize: selectedFile.size,
+          mimeType: selectedFile.type || 'application/octet-stream',
+          csrf_token: shareInfo.csrfToken,
+          'cf-turnstile-response': turnstileInput ? turnstileInput.value : undefined
+        })
       });
+      if (!initRes.ok) {
+        const d = await initRes.json().catch(() => ({}));
+        throw new Error(`[init ${initRes.status}] ${d.error || 'Upload failed'}`);
+      }
+      const { accessToken, folderId, accountId } = await initRes.json();
+
+      // STEP 2: browser KHUD Google se session banakar file bhejta hai
+      let driveFile;
+      try {
+        driveFile = await uploadToGoogle(null, selectedFile, accessToken, folderId, (pct) => {
+          progressBar.style.width = pct + '%';
+          progressText.textContent = pct + '%';
+        });
+      } catch (e) {
+        throw new Error(`[google] ${e.message}`);
+      }
+      if (!driveFile || !driveFile.id) throw new Error('[google] Upload incomplete — please retry');
+
+      // STEP 3: server ko batao taaki share link bane
+      const completeRes = await fetch('/share/upload/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileId: driveFile.id,
+          accountId,
+          fileName: selectedFile.name,
+          fileSize: selectedFile.size,
+          mimeType: selectedFile.type || 'application/octet-stream',
+          expiry_days: expiryDays,
+          password,
+          csrf_token: shareInfo.csrfToken
+        })
+      });
+      if (!completeRes.ok) {
+        const d = await completeRes.json().catch(() => ({}));
+        throw new Error(`[complete ${completeRes.status}] ${d.error || 'Upload finalize failed'}`);
+      }
+      const result = await completeRes.json();
 
       progressEl.classList.add('hidden');
       const shareLink = `${window.location.origin}/#/share/${result.shareId}`;
