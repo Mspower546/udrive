@@ -119,6 +119,65 @@ files.post('/upload', async (c) => {
   return c.json(result);
 });
 
+// === STEP 1: Resumable upload session banao (badi files ke liye) ===
+// Browser pehle yahan file ka naam/size bhejta hai. Worker account chunta hai,
+// Google se session URL leta hai, aur browser ko URL wapas deta hai.
+files.post('/upload/init', async (c) => {
+  const user = c.get('user');
+  let err = requireAuth(c, user);
+  if (err) return err;
+  err = requirePermission(c, user, 'drive:upload');
+  if (err) return err;
+
+  const db = c.get('db');
+  const body = await c.req.json().catch(() => ({}));
+  const { fileName, fileSize, mimeType } = body;
+  const folderId = body.folderId || await getSharedFolderId(db);
+
+  if (!fileName) return c.json({ error: 'No file name provided' }, 400);
+  if (!folderId) return c.json({ error: 'No shared folder configured' }, 400);
+
+  const size = parseInt(fileSize || '0', 10);
+  const account = await selectAccount(db, size);
+  if (!account) return c.json({ error: 'Insufficient storage across all accounts' }, 507);
+
+  const { uploadUrl } = await drive.createResumableUpload(
+    c.env, db, account.id, folderId, fileName, mimeType, size
+  );
+
+  // Browser ko ye sab wapas: kaha bhejna hai + kis account ko gina jaaye
+  return c.json({ uploadUrl, accountId: account.id, accountEmail: account.email });
+});
+
+// === STEP 2: Upload complete hone par DB update karo ===
+// Jab browser ne file seedhe Google ko bhej di, to wo yahan file ki id bhejta hai.
+// Worker storage_used badhata hai aur ownership record karta hai.
+files.post('/upload/complete', async (c) => {
+  const user = c.get('user');
+  let err = requireAuth(c, user);
+  if (err) return err;
+  err = requirePermission(c, user, 'drive:upload');
+  if (err) return err;
+
+  const db = c.get('db');
+  const body = await c.req.json().catch(() => ({}));
+  const { fileId, accountId, fileName, fileSize } = body;
+
+  if (!fileId || !accountId) return c.json({ error: 'Missing fileId or accountId' }, 400);
+
+  const size = parseInt(fileSize || '0', 10);
+  const account = await db.prepare('SELECT email FROM accounts WHERE id = ?').bind(accountId).first();
+
+  await db.prepare("UPDATE accounts SET storage_used = storage_used + ?, updated_at = datetime('now') WHERE id = ?")
+    .bind(size, accountId).run();
+  await db.prepare('INSERT OR REPLACE INTO file_owners (file_id, account_id) VALUES (?, ?)')
+    .bind(fileId, accountId).run();
+
+  await logActivity(db, user.id, user.username, 'upload', `${fileName || fileId} (${account?.email || accountId})`);
+
+  return c.json({ ok: true, id: fileId });
+});
+
 files.get('/:fileId/info', async (c) => {
   const user = c.get('user');
   const err = requireAuth(c, user);
