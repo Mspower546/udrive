@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { uploadFile, downloadFile, permanentDeleteFile } from '../services/google-drive.js';
+import { uploadFile, downloadFile, permanentDeleteFile, createResumableUpload } from '../services/google-drive.js';
 import { selectShareAccount } from '../services/account-selector.js';
 import { hashPassword, verifyPassword } from '../services/password.js';
 import { logSystem } from '../services/logger.js';
@@ -99,7 +99,11 @@ sharePublic.get('/info', async (c) => {
   });
 });
 
-sharePublic.post('/upload', async (c) => {
+// === STEP 1: Quick Share resumable session banao ===
+// CSRF/rate-limit/turnstile yahan check hote hmain. File ka naam/size aata hai
+// (file nahi), aur hum Google se ek session URL banakar dete hmain.
+// Browser us URL par file SEEDHE Google ko bhejega (Cloudflare beech mein nahi).
+sharePublic.post('/upload/init', async (c) => {
   const db = c.get('db');
   const settings = await getShareSettings(db);
 
@@ -110,20 +114,20 @@ sharePublic.post('/upload', async (c) => {
     return c.json({ error: 'Share folder not configured' }, 400);
   }
 
-  const formData = await c.req.formData();
+  const body = await c.req.json().catch(() => ({}));
 
   // CSRF validation
-  const csrfToken = formData.get('csrf_token');
+  const csrfToken = body.csrf_token;
   if (!csrfToken) return c.json({ error: 'Invalid request' }, 403);
   const csrfRow = await db.prepare("SELECT value FROM settings WHERE key = ?").bind(`csrf:${csrfToken}`).first();
   if (!csrfRow || csrfRow.value < new Date().toISOString().replace('T', ' ').slice(0, 19)) {
     return c.json({ error: 'Invalid or expired token' }, 403);
   }
-  await db.prepare("DELETE FROM settings WHERE key = ?").bind(`csrf:${csrfToken}`).run();
+  // Note: CSRF token yahan delete NAHI karte, kyunki complete step mein bhi chahiye.
 
   // Turnstile verification
   if (c.env.TURNSTILE_SECRET_KEY) {
-    const turnstileToken = formData.get('cf-turnstile-response');
+    const turnstileToken = body['cf-turnstile-response'];
     if (!turnstileToken) return c.json({ error: 'Captcha verification required' }, 400);
     const ip = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || '';
     const valid = await verifyTurnstile(c.env.TURNSTILE_SECRET_KEY, turnstileToken, ip);
@@ -135,32 +139,62 @@ sharePublic.post('/upload', async (c) => {
   const rateLimitOk = await checkUploadRateLimit(db, clientIP);
   if (!rateLimitOk) return c.json({ error: 'Too many uploads. Please try again later.' }, 429);
 
-  const file = formData.get('file');
-  if (!file) return c.json({ error: 'No file provided' }, 400);
+  const fileName = body.fileName;
+  const fileSize = parseInt(body.fileSize || '0', 10);
+  const mimeType = body.mimeType || 'application/octet-stream';
+  if (!fileName) return c.json({ error: 'No file provided' }, 400);
 
   const maxSize = (parseInt(settings.share_max_file_size_mb) || 100) * 1024 * 1024;
-  if (file.size > maxSize) {
+  if (fileSize > maxSize) {
     return c.json({ error: `File exceeds maximum size of ${settings.share_max_file_size_mb}MB` }, 400);
   }
 
-  const maxExpiry = parseInt(settings.share_max_expiry_days) || 30;
-  const defaultExpiry = parseInt(settings.share_default_expiry_days) || 7;
-  let expiryDays = parseInt(formData.get('expiry_days')) || defaultExpiry;
-  if (expiryDays > maxExpiry) expiryDays = maxExpiry;
-  if (expiryDays < 1) expiryDays = 1;
-
-  const password = formData.get('password') || null;
-
-  const account = await selectShareAccount(db, file.size);
+  const account = await selectShareAccount(db, fileSize);
   if (!account) {
     return c.json({ error: 'No storage space available' }, 507);
   }
 
-  const buffer = await file.arrayBuffer();
-  const driveFile = await uploadFile(c.env, db, account.id, settings.share_folder_id, buffer, {
-    name: file.name,
-    type: file.type || 'application/octet-stream'
-  });
+  const { uploadUrl } = await createResumableUpload(
+    c.env, db, account.id, settings.share_folder_id, fileName, mimeType, fileSize
+  );
+
+  return c.json({ uploadUrl, accountId: account.id });
+});
+
+// === STEP 2: Quick Share complete — file Google par chadhne ke baad share record banao ===
+sharePublic.post('/upload/complete', async (c) => {
+  const db = c.get('db');
+  const settings = await getShareSettings(db);
+
+  if (settings.share_enabled !== '1') {
+    return c.json({ error: 'File sharing is disabled' }, 403);
+  }
+
+  const body = await c.req.json().catch(() => ({}));
+
+  // CSRF validation (ab token use karke delete kar dete hmain)
+  const csrfToken = body.csrf_token;
+  if (!csrfToken) return c.json({ error: 'Invalid request' }, 403);
+  const csrfRow = await db.prepare("SELECT value FROM settings WHERE key = ?").bind(`csrf:${csrfToken}`).first();
+  if (!csrfRow || csrfRow.value < new Date().toISOString().replace('T', ' ').slice(0, 19)) {
+    return c.json({ error: 'Invalid or expired token' }, 403);
+  }
+  await db.prepare("DELETE FROM settings WHERE key = ?").bind(`csrf:${csrfToken}`).run();
+
+  const fileId = body.fileId;
+  const accountId = body.accountId;
+  const fileName = body.fileName;
+  const fileSize = parseInt(body.fileSize || '0', 10);
+  const mimeType = body.mimeType || 'application/octet-stream';
+  if (!fileId || !accountId) return c.json({ error: 'Missing fileId or accountId' }, 400);
+
+  const maxExpiry = parseInt(settings.share_max_expiry_days) || 30;
+  const defaultExpiry = parseInt(settings.share_default_expiry_days) || 7;
+  let expiryDays = parseInt(body.expiry_days) || defaultExpiry;
+  if (expiryDays > maxExpiry) expiryDays = maxExpiry;
+  if (expiryDays < 1) expiryDays = 1;
+
+  const password = body.password || null;
 
   const shareId = generateShareId();
   const passwordHash = password ? await hashPassword(password) : null;
@@ -169,15 +203,19 @@ sharePublic.post('/upload', async (c) => {
   await db.prepare(
     `INSERT INTO shared_files (share_id, file_name, file_size, mime_type, drive_file_id, account_id, password_hash, expiry_days, expires_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(shareId, file.name, file.size, file.type || 'application/octet-stream', driveFile.id, account.id, passwordHash, expiryDays, expiresAt).run();
+  ).bind(shareId, fileName, fileSize, mimeType, fileId, accountId, passwordHash, expiryDays, expiresAt).run();
 
-  await logSystem(db, 'info', 'File shared', `${file.name} (${shareId})`);
+  // Storage used update
+  await db.prepare("UPDATE accounts SET storage_used = storage_used + ?, updated_at = datetime('now') WHERE id = ?")
+    .bind(fileSize, accountId).run();
+
+  await logSystem(db, 'info', 'File shared', `${fileName} (${shareId})`);
 
   broadcast('share-created', {
     id: null,
     shareId,
-    fileName: file.name,
-    fileSize: file.size,
+    fileName,
+    fileSize,
     hasPassword: !!password,
     expiryDays,
     expiresAt,
@@ -191,8 +229,8 @@ sharePublic.post('/upload', async (c) => {
 
   return c.json({
     shareId,
-    fileName: file.name,
-    fileSize: file.size,
+    fileName,
+    fileSize,
     expiresAt,
     hasPassword: !!password
   });
