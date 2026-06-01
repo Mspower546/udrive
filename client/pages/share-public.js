@@ -1,5 +1,6 @@
 import { initTheme } from '../theme.js';
 import { generateQRCode } from '../qr.js';
+import { uploadToGoogle } from '../components/transfer-panel.js';
 
 function formatFileSize(bytes) {
   if (bytes === 0) return '0 B';
@@ -314,41 +315,14 @@ async function renderUploadPage(main) {
         const d = await initRes.json().catch(() => ({}));
         throw new Error(d.error || 'Upload failed');
       }
-      const { uploadUrl, accountId } = await initRes.json();
+      const { accessToken, folderId, accountId } = await initRes.json();
 
-      // --- STEP 2: file ko SEEDHE Google par bhejo ---
-      let driveFile = await new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.upload.addEventListener('progress', (e) => {
-          if (e.lengthComputable) {
-            const pct = Math.round((e.loaded / e.total) * 100);
-            progressBar.style.width = pct + '%';
-            progressText.textContent = pct + '%';
-          }
-        });
-        xhr.addEventListener('load', () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            try { resolve(JSON.parse(xhr.responseText)); } catch { resolve({}); }
-          } else { resolve(null); }
-        });
-        xhr.addEventListener('error', () => resolve(null));
-        xhr.open('PUT', uploadUrl);
-        xhr.setRequestHeader('Content-Type', selectedFile.type || 'application/octet-stream');
-        xhr.send(selectedFile);
+      // --- STEP 2: browser KHUD Google se session banakar file bhejta hai ---
+      const driveFile = await uploadToGoogle(null, selectedFile, accessToken, folderId, (pct) => {
+        progressBar.style.width = pct + '%';
+        progressText.textContent = pct + '%';
       });
 
-      // Network error / 308 par status check karke confirm karo
-      if (!driveFile || !driveFile.id) {
-        try {
-          const stRes = await fetch(uploadUrl, {
-            method: 'PUT',
-            headers: { 'Content-Range': `bytes */${selectedFile.size}` }
-          });
-          if (stRes.status === 200 || stRes.status === 201) {
-            try { driveFile = await stRes.json(); } catch { driveFile = null; }
-          }
-        } catch {}
-      }
       if (!driveFile || !driveFile.id) throw new Error('Upload incomplete — please retry');
 
       // --- STEP 3: server ko batao taaki share link bane ---
