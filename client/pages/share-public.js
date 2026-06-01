@@ -313,17 +313,22 @@ async function renderUploadPage(main) {
       });
       if (!initRes.ok) {
         const d = await initRes.json().catch(() => ({}));
-        throw new Error(d.error || 'Upload failed');
+        throw new Error(`[init ${initRes.status}] ${d.error || 'Upload failed'}`);
       }
       const { accessToken, folderId, accountId } = await initRes.json();
 
       // --- STEP 2: browser KHUD Google se session banakar file bhejta hai ---
-      const driveFile = await uploadToGoogle(null, selectedFile, accessToken, folderId, (pct) => {
-        progressBar.style.width = pct + '%';
-        progressText.textContent = pct + '%';
-      });
+      let driveFile;
+      try {
+        driveFile = await uploadToGoogle(null, selectedFile, accessToken, folderId, (pct) => {
+          progressBar.style.width = pct + '%';
+          progressText.textContent = pct + '%';
+        });
+      } catch (e) {
+        throw new Error(`[google] ${e.message}`);
+      }
 
-      if (!driveFile || !driveFile.id) throw new Error('Upload incomplete — please retry');
+      if (!driveFile || !driveFile.id) throw new Error('[google] Upload incomplete — please retry');
 
       // --- STEP 3: server ko batao taaki share link bane ---
       const completeRes = await fetch('/share/upload/complete', {
@@ -342,7 +347,7 @@ async function renderUploadPage(main) {
       });
       if (!completeRes.ok) {
         const d = await completeRes.json().catch(() => ({}));
-        throw new Error(d.error || 'Upload finalize failed');
+        throw new Error(`[complete ${completeRes.status}] ${d.error || 'Upload finalize failed'}`);
       }
       const result = await completeRes.json();
 
