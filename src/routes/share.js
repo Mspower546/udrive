@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { uploadFile, downloadFile, permanentDeleteFile, createResumableUpload } from '../services/google-drive.js';
+import { uploadFile, downloadFile, permanentDeleteFile, getAccessTokenForBrowser } from '../services/google-drive.js';
 import { selectShareAccount } from '../services/account-selector.js';
 import { hashPassword, verifyPassword } from '../services/password.js';
 import { logSystem } from '../services/logger.js';
@@ -154,11 +154,14 @@ sharePublic.post('/upload/init', async (c) => {
     return c.json({ error: 'No storage space available' }, 507);
   }
 
-  const { uploadUrl } = await createResumableUpload(
-    c.env, db, account.id, settings.share_folder_id, fileName, mimeType, fileSize
-  );
+  // Browser ko token + folder dete hmain (browser khud session banayega — CORS sahi).
+  const accessToken = await getAccessTokenForBrowser(c.env, db, account.id);
 
-  return c.json({ uploadUrl, accountId: account.id });
+  return c.json({
+    accessToken,
+    folderId: settings.share_folder_id,
+    accountId: account.id
+  });
 });
 
 // === STEP 2: Quick Share complete — file Google par chadhne ke baad share record banao ===

@@ -141,12 +141,16 @@ files.post('/upload/init', async (c) => {
   const account = await selectAccount(db, size);
   if (!account) return c.json({ error: 'Insufficient storage across all accounts' }, 507);
 
-  const { uploadUrl } = await drive.createResumableUpload(
-    c.env, db, account.id, folderId, fileName, mimeType, size
-  );
+  // Browser ko token + folder dete hmain. Browser khud Google se session banayega
+  // (CORS isi tarah sahi kaam karta hai).
+  const accessToken = await drive.getAccessTokenForBrowser(c.env, db, account.id);
 
-  // Browser ko ye sab wapas: kaha bhejna hai + kis account ko gina jaaye
-  return c.json({ uploadUrl, accountId: account.id, accountEmail: account.email });
+  return c.json({
+    accessToken,
+    folderId,
+    accountId: account.id,
+    accountEmail: account.email
+  });
 });
 
 // === STEP 2: Upload complete hone par DB update karo ===
