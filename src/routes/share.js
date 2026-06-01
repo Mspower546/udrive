@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { uploadFile, downloadFile, permanentDeleteFile, getAccessTokenForBrowser } from '../services/google-drive.js';
+import { uploadFile, downloadFile, downloadFileStream, permanentDeleteFile, getAccessTokenForBrowser } from '../services/google-drive.js';
 import { selectShareAccount } from '../services/account-selector.js';
 import { hashPassword, verifyPassword } from '../services/password.js';
 import { logSystem } from '../services/logger.js';
@@ -313,23 +313,30 @@ sharePublic.get('/:shareId/download', async (c) => {
     if (!valid) return c.json({ error: 'Invalid password' }, 401);
   }
 
-  const { metadata, body } = await downloadFile(c.env, db, file.account_id, file.drive_file_id);
-
-  // Reset expiry to original duration from now
+  // Reset expiry to original duration from now (download se PEHLE)
   const newExpiresAt = new Date(Date.now() + file.expiry_days * 24 * 60 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19);
   await db.prepare(
     'UPDATE shared_files SET download_count = download_count + 1, last_accessed_at = datetime(\'now\'), expires_at = ? WHERE id = ?'
   ).bind(newExpiresAt, file.id).run();
-
   broadcast('share-downloaded', { shareId, downloadCount: file.download_count + 1, expiresAt: newExpiresAt });
 
-  return new Response(body, {
-    headers: {
-      'Content-Type': file.mime_type || 'application/octet-stream',
-      'Content-Disposition': `attachment; filename="${encodeURIComponent(file.file_name)}"`,
-      ...(metadata.size ? { 'Content-Length': metadata.size } : {})
-    }
-  });
+  // Tez download: sirf media stream (metadata DB se, extra Google call nahi).
+  // Range support taaki download manager / resume bhi chale.
+  const rangeHeader = c.req.header('Range');
+  const { body, status, headers: gh } = await downloadFileStream(c.env, db, file.account_id, file.drive_file_id, rangeHeader);
+
+  const respHeaders = {
+    'Content-Type': file.mime_type || 'application/octet-stream',
+    'Content-Disposition': `attachment; filename="${encodeURIComponent(file.file_name)}"`,
+    'Accept-Ranges': 'bytes'
+  };
+  if (rangeHeader && status === 206) {
+    const cr = gh.get('content-range'); if (cr) respHeaders['Content-Range'] = cr;
+    const cl = gh.get('content-length'); if (cl) respHeaders['Content-Length'] = cl;
+    return new Response(body, { status: 206, headers: respHeaders });
+  }
+  if (file.file_size) respHeaders['Content-Length'] = String(file.file_size);
+  return new Response(body, { headers: respHeaders });
 });
 
 // Admin routes (mounted under /api/share, auth applied by app.js)
