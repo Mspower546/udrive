@@ -170,60 +170,13 @@ async function uploadWithProgress(item) {
     throw new Error(data.error || `Upload init failed: ${initRes.status}`);
   }
 
-  const { uploadUrl, accountId } = await initRes.json();
+  const { accessToken, folderId, accountId } = await initRes.json();
 
-  // --- STEP 2: File ko SEEDHE Google par bhejo (PUT, progress ke saath) ---
-  // Badi file par browser kabhi "network error" de deta hai bhale hi Google ne
-  // file le li ho. Isliye error aaye to neeche status check karke confirm karte hmain.
-  let driveFile = await new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    item._xhr = xhr;
-
-    let lastLoaded = 0;
-    let lastTime = Date.now();
-
-    xhr.upload.addEventListener('progress', (e) => {
-      if (e.lengthComputable) {
-        item.progress = Math.round((e.loaded / e.total) * 100);
-        const now = Date.now();
-        const elapsed = (now - lastTime) / 1000;
-        if (elapsed > 0.5) {
-          item.speed = (e.loaded - lastLoaded) / elapsed;
-          lastLoaded = e.loaded;
-          lastTime = now;
-        }
-        updateItemProgress(item);
-      }
-    });
-
-    xhr.addEventListener('load', () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        try { resolve(JSON.parse(xhr.responseText)); }
-        catch { resolve({}); }
-      } else {
-        // 308 etc. — file shayad chadh gayi, neeche status check kar lenge
-        resolve(null);
-      }
-    });
-
-    // Network error par bhi reject NAHI karte — neeche status check karenge
-    xhr.addEventListener('error', () => resolve(null));
-    xhr.addEventListener('abort', () => reject(new Error('Cancelled')));
-
-    // PUT seedha Google ke session URL par. Empty file ke liye bhi ye safe hai.
-    xhr.open('PUT', uploadUrl);
-    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
-    xhr.send(file);
-  });
+  // --- STEP 2: Browser KHUD Google se resumable session banata hai (XHR) ---
+  // CORS isi tarah sahi kaam karta hai (server se bane URL par CORS block hota hai).
+  const driveFile = await uploadToGoogle(item, file, accessToken, folderId);
 
   if (item.status === 'cancelled') return;
-
-  // Agar response saaf nahi mila (network error / 308), to Google se poochho
-  // ki file poori pahuchi ya nahi (resumable status query).
-  if (!driveFile || !driveFile.id) {
-    driveFile = await checkResumableStatus(uploadUrl, file);
-  }
-
   if (!driveFile || !driveFile.id) {
     throw new Error('Upload incomplete — please retry');
   }
@@ -248,25 +201,71 @@ async function uploadWithProgress(item) {
   return driveFile;
 }
 
-// Google se poochho ki resumable upload poora hua ya nahi.
-// "Content-Range: bytes * /<total>" bhejne par:
-//   - 200/201 = file poori chadh gayi (body mein file ki id aati hai)
-//   - 308     = abhi adhuri hai
-async function checkResumableStatus(uploadUrl, file) {
-  try {
-    const res = await fetch(uploadUrl, {
-      method: 'PUT',
-      headers: {
-        'Content-Range': `bytes */${file.size}`
+// Browser khud session banakar file Google ko bhejta hai. progressItem optional.
+export async function uploadToGoogle(progressItem, file, accessToken, folderId, onProgress) {
+  // Session banao (XHR zaroori hai taaki Location header + CORS sahi mile)
+  const uploadUrl = await new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', 'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,mimeType,size');
+    xhr.setRequestHeader('Authorization', `Bearer ${accessToken}`);
+    xhr.setRequestHeader('Content-Type', 'application/json; charset=UTF-8');
+    xhr.setRequestHeader('X-Upload-Content-Type', file.type || 'application/octet-stream');
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        const loc = xhr.getResponseHeader('Location');
+        if (loc) resolve(loc); else reject(new Error('No upload URL from Google'));
+      } else {
+        reject(new Error(`Session create failed: ${xhr.status}`));
+      }
+    };
+    xhr.onerror = () => reject(new Error('Network error (session)'));
+    xhr.send(JSON.stringify({ name: file.name, parents: [folderId] }));
+  });
+
+  // File ko us session URL par PUT karo (progress ke saath)
+  const driveFile = await new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    if (progressItem) progressItem._xhr = xhr;
+
+    let lastLoaded = 0;
+    let lastTime = Date.now();
+
+    xhr.upload.addEventListener('progress', (e) => {
+      if (e.lengthComputable) {
+        const pct = Math.round((e.loaded / e.total) * 100);
+        if (progressItem) {
+          progressItem.progress = pct;
+          const now = Date.now();
+          const elapsed = (now - lastTime) / 1000;
+          if (elapsed > 0.5) {
+            progressItem.speed = (e.loaded - lastLoaded) / elapsed;
+            lastLoaded = e.loaded;
+            lastTime = now;
+          }
+          updateItemProgress(progressItem);
+        }
+        if (onProgress) onProgress(pct);
       }
     });
-    if (res.status === 200 || res.status === 201) {
-      try { return await res.json(); } catch { return { id: 'unknown' }; }
-    }
-    return null;
-  } catch {
-    return null;
-  }
+
+    xhr.addEventListener('load', () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try { resolve(JSON.parse(xhr.responseText)); }
+        catch { resolve({ id: 'unknown' }); }
+      } else {
+        reject(new Error(`Upload failed: ${xhr.status}`));
+      }
+    });
+
+    xhr.addEventListener('error', () => reject(new Error('Network error')));
+    xhr.addEventListener('abort', () => reject(new Error('Cancelled')));
+
+    xhr.open('PUT', uploadUrl);
+    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+    xhr.send(file);
+  });
+
+  return driveFile;
 }
 
 // === Download Logic ===
