@@ -225,4 +225,25 @@ accounts.get('/:id/storage', async (c) => {
   return c.json(quota);
 });
 
+// Saare accounts ka asli storage Google se laao aur DB update karo.
+// Isse purani files bhi count ho jaati hmain aur direct Drive par daali files bhi.
+accounts.post('/refresh-all-storage', async (c) => {
+  const user = c.get('user');
+  const err = requireAuth(c, user);
+  if (err) return err;
+
+  const db = c.get("db");
+  const { results } = await db.prepare('SELECT id FROM accounts').all();
+  let updated = 0;
+  for (const acc of results) {
+    try {
+      const quota = await getStorageQuota(c.env, db, acc.id);
+      await db.prepare("UPDATE accounts SET storage_limit = ?, storage_used = ?, file_count = ?, updated_at = datetime('now') WHERE id = ?")
+        .bind(quota.limit, quota.used, quota.fileCount, acc.id).run();
+      updated++;
+    } catch {}
+  }
+  return c.json({ ok: true, updated });
+});
+
 export default accounts;
