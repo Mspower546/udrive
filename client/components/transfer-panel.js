@@ -173,7 +173,9 @@ async function uploadWithProgress(item) {
   const { uploadUrl, accountId } = await initRes.json();
 
   // --- STEP 2: File ko SEEDHE Google par bhejo (PUT, progress ke saath) ---
-  const driveFile = await new Promise((resolve, reject) => {
+  // Badi file par browser kabhi "network error" de deta hai bhale hi Google ne
+  // file le li ho. Isliye error aaye to neeche status check karke confirm karte hmain.
+  let driveFile = await new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     item._xhr = xhr;
 
@@ -199,11 +201,13 @@ async function uploadWithProgress(item) {
         try { resolve(JSON.parse(xhr.responseText)); }
         catch { resolve({}); }
       } else {
-        reject(new Error(`Upload failed: ${xhr.status}`));
+        // 308 etc. — file shayad chadh gayi, neeche status check kar lenge
+        resolve(null);
       }
     });
 
-    xhr.addEventListener('error', () => reject(new Error('Network error')));
+    // Network error par bhi reject NAHI karte — neeche status check karenge
+    xhr.addEventListener('error', () => resolve(null));
     xhr.addEventListener('abort', () => reject(new Error('Cancelled')));
 
     // PUT seedha Google ke session URL par. Empty file ke liye bhi ye safe hai.
@@ -213,6 +217,16 @@ async function uploadWithProgress(item) {
   });
 
   if (item.status === 'cancelled') return;
+
+  // Agar response saaf nahi mila (network error / 308), to Google se poochho
+  // ki file poori pahuchi ya nahi (resumable status query).
+  if (!driveFile || !driveFile.id) {
+    driveFile = await checkResumableStatus(uploadUrl, file);
+  }
+
+  if (!driveFile || !driveFile.id) {
+    throw new Error('Upload incomplete — please retry');
+  }
 
   // --- STEP 3: Worker ko batao "ho gaya" taaki wo DB update kare ---
   const completeRes = await fetch('/api/files/upload/complete', {
@@ -232,6 +246,27 @@ async function uploadWithProgress(item) {
   }
 
   return driveFile;
+}
+
+// Google se poochho ki resumable upload poora hua ya nahi.
+// "Content-Range: bytes * /<total>" bhejne par:
+//   - 200/201 = file poori chadh gayi (body mein file ki id aati hai)
+//   - 308     = abhi adhuri hai
+async function checkResumableStatus(uploadUrl, file) {
+  try {
+    const res = await fetch(uploadUrl, {
+      method: 'PUT',
+      headers: {
+        'Content-Range': `bytes */${file.size}`
+      }
+    });
+    if (res.status === 200 || res.status === 201) {
+      try { return await res.json(); } catch { return { id: 'unknown' }; }
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 // === Download Logic ===
