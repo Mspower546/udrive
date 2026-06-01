@@ -147,13 +147,35 @@ async function processUploadQueue() {
   }
 }
 
-function uploadWithProgress(item) {
-  return new Promise((resolve, reject) => {
+// Direct-to-Google resumable upload.
+// File browser se SEEDHE Google ko jaati hai (Cloudflare beech mein nahi).
+// Isliye Cloudflare ki 100MB / 503 limit lagti hi nahi — bada file bhi chalega.
+async function uploadWithProgress(item) {
+  const file = item.file;
+
+  // --- STEP 1: Worker se session URL maango ---
+  const initRes = await fetch('/api/files/upload/init', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      fileName: file.name,
+      fileSize: file.size,
+      mimeType: file.type || 'application/octet-stream',
+      folderId: item.folderId || undefined
+    })
+  });
+
+  if (!initRes.ok) {
+    const data = await initRes.json().catch(() => ({}));
+    throw new Error(data.error || `Upload init failed: ${initRes.status}`);
+  }
+
+  const { uploadUrl, accountId } = await initRes.json();
+
+  // --- STEP 2: File ko SEEDHE Google par bhejo (PUT, progress ke saath) ---
+  const driveFile = await new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     item._xhr = xhr;
-    const formData = new FormData();
-    formData.append('file', item.file);
-    if (item.folderId) formData.append('folderId', item.folderId);
 
     let lastLoaded = 0;
     let lastTime = Date.now();
@@ -174,18 +196,42 @@ function uploadWithProgress(item) {
 
     xhr.addEventListener('load', () => {
       if (xhr.status >= 200 && xhr.status < 300) {
-        resolve(JSON.parse(xhr.responseText));
+        try { resolve(JSON.parse(xhr.responseText)); }
+        catch { resolve({}); }
       } else {
-        try { reject(new Error(JSON.parse(xhr.responseText).error || `Upload failed: ${xhr.status}`)); }
-        catch { reject(new Error(`Upload failed: ${xhr.status}`)); }
+        reject(new Error(`Upload failed: ${xhr.status}`));
       }
     });
 
     xhr.addEventListener('error', () => reject(new Error('Network error')));
     xhr.addEventListener('abort', () => reject(new Error('Cancelled')));
-    xhr.open('POST', '/api/files/upload');
-    xhr.send(formData);
+
+    // PUT seedha Google ke session URL par. Empty file ke liye bhi ye safe hai.
+    xhr.open('PUT', uploadUrl);
+    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+    xhr.send(file);
   });
+
+  if (item.status === 'cancelled') return;
+
+  // --- STEP 3: Worker ko batao "ho gaya" taaki wo DB update kare ---
+  const completeRes = await fetch('/api/files/upload/complete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      fileId: driveFile.id,
+      accountId,
+      fileName: driveFile.name || file.name,
+      fileSize: file.size
+    })
+  });
+
+  if (!completeRes.ok) {
+    const data = await completeRes.json().catch(() => ({}));
+    throw new Error(data.error || `Upload finalize failed: ${completeRes.status}`);
+  }
+
+  return driveFile;
 }
 
 // === Download Logic ===
