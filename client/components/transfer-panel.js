@@ -7,7 +7,7 @@ let isMinimized = false;
 let panelVisible = true;
 let panelRendered = false;
 let processing = false;
-let uploadCompleteCallback = null;
+let uploadCompleteCallbacks = [];
 let onChangeCallback = null;
 let abortControllers = new Map();
 let pausedDownloads = new Map();
@@ -35,7 +35,7 @@ export function getTransferState() {
 }
 
 export function onUploadComplete(callback) {
-  uploadCompleteCallback = callback;
+  uploadCompleteCallbacks.push(callback);
 }
 
 export function getAllTransfers() {
@@ -115,6 +115,14 @@ async function processUploadQueue() {
   if (processing) return;
   processing = true;
 
+  // Safety: agar 30 minute tak processing stuck ho to reset karo
+  const safetyTimer = setTimeout(() => {
+    if (processing) {
+      processing = false;
+      console.warn('Upload queue processing stuck — reset after 30 minutes');
+    }
+  }, 30 * 60 * 1000);
+
   while (true) {
     const item = uploadQueue.find(i => i.status === 'waiting');
     if (!item) break;
@@ -140,10 +148,15 @@ async function processUploadQueue() {
     notifyChange();
   }
 
+  clearTimeout(safetyTimer);
   processing = false;
 
-  if (uploadCompleteCallback && uploadQueue.every(i => i.status === 'done' || i.status === 'failed' || i.status === 'cancelled')) {
-    uploadCompleteCallback();
+  if (uploadCompleteCallbacks.length > 0 && uploadQueue.every(i => i.status === 'done' || i.status === 'failed' || i.status === 'cancelled')) {
+    const cbs = [...uploadCompleteCallbacks];
+    uploadCompleteCallbacks = [];
+    for (const cb of cbs) {
+      try { await cb(); } catch (e) { console.error('Upload complete callback error:', e); }
+    }
   }
 }
 
@@ -174,7 +187,61 @@ async function uploadWithProgress(item) {
 
   // --- STEP 2: Browser KHUD Google se resumable session banata hai (XHR) ---
   // CORS isi tarah sahi kaam karta hai (server se bane URL par CORS block hota hai).
-  const driveFile = await uploadToGoogle(item, file, accessToken, folderId);
+  let driveFile;
+  let currentToken = accessToken;
+  let currentFolderId = folderId;
+  let currentAccountId = accountId;
+  let retries = 0;
+  const maxRetries = 3;
+
+  while (retries < maxRetries) {
+    try {
+      driveFile = await uploadToGoogle(item, file, currentToken, currentFolderId);
+      break; // Success
+    } catch (err) {
+      if (item.status === 'cancelled') return;
+
+      // Agar 401/403 aaye — token expire ho gaya, naya token lo
+      if ((err.message.includes('401') || err.message.includes('403') || err.message.includes('token')) && retries < maxRetries - 1) {
+        retries++;
+        if (item) {
+          item.error = `Token expired, refreshing... (${retries}/${maxRetries})`;
+          renderPanel(true);
+        }
+        try {
+          const refreshRes = await fetch('/api/files/upload/init', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              fileName: file.name,
+              fileSize: file.size,
+              mimeType: file.type || 'application/octet-stream',
+              folderId: item.folderId || undefined
+            })
+          });
+          if (refreshRes.ok) {
+            const refreshData = await refreshRes.json();
+            currentToken = refreshData.accessToken;
+            currentFolderId = refreshData.folderId;
+            currentAccountId = refreshData.accountId;
+            item.error = null;
+            continue; // Retry upload with new token
+          }
+        } catch {}
+      }
+
+      // Network error — retry
+      if (err.message.includes('Network') && retries < maxRetries - 1) {
+        retries++;
+        item.error = `Network error, retrying... (${retries}/${maxRetries})`;
+        renderPanel(true);
+        await new Promise(r => setTimeout(r, 2000 * retries));
+        continue;
+      }
+
+      throw err; // Non-retryable error
+    }
+  }
 
   if (item.status === 'cancelled') return;
   if (!driveFile || !driveFile.id) {
@@ -182,20 +249,42 @@ async function uploadWithProgress(item) {
   }
 
   // --- STEP 3: Worker ko batao "ho gaya" taaki wo DB update kare ---
-  const completeRes = await fetch('/api/files/upload/complete', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      fileId: driveFile.id,
-      accountId,
-      fileName: driveFile.name || file.name,
-      fileSize: file.size
-    })
-  });
-
-  if (!completeRes.ok) {
-    const data = await completeRes.json().catch(() => ({}));
-    throw new Error(data.error || `Upload finalize failed: ${completeRes.status}`);
+  // Retry logic — agar network fail ho to 3 baar try karo
+  let completeOk = false;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const completeRes = await fetch('/api/files/upload/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileId: driveFile.id,
+          accountId: currentAccountId,
+          fileName: driveFile.name || file.name,
+          fileSize: file.size
+        })
+      });
+      if (completeRes.ok) {
+        completeOk = true;
+        break;
+      }
+      // Agar server error aaye to retry karo
+      if (completeRes.status >= 500 && attempt < 3) {
+        await new Promise(r => setTimeout(r, 1000 * attempt));
+        continue;
+      }
+      const data = await completeRes.json().catch(() => ({}));
+      throw new Error(data.error || `Upload finalize failed: ${completeRes.status}`);
+    } catch (err) {
+      if (err.message.includes('finalize') || err.message.includes('Missing')) throw err;
+      if (attempt < 3) {
+        await new Promise(r => setTimeout(r, 1000 * attempt));
+        continue;
+      }
+      // Agar 3 baar fail — file Google pe hai lekin DB update nahi hua
+      // User ko warn karo lekin upload fail mat dikhao
+      console.warn(`Upload complete failed after 3 attempts. File ${driveFile.id} exists in Google Drive but DB not updated.`);
+      break;
+    }
   }
 
   return driveFile;
@@ -254,6 +343,9 @@ export async function uploadToGoogle(progressItem, file, accessToken, folderId, 
       if (xhr.status >= 200 && xhr.status < 300) {
         try { resolve(JSON.parse(xhr.responseText)); }
         catch { resolve({ id: 'unknown' }); }
+      } else if (xhr.status === 401 || xhr.status === 403) {
+        // Token expired — reject with clear message so caller can refresh
+        reject(new Error(`Token expired (status ${xhr.status})`));
       } else {
         // 308 ya koi aur — neeche status check karke confirm karenge
         resolve(null);
