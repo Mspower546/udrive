@@ -10,8 +10,14 @@ import { formatDate } from '../time-utils.js';
 
 let folderStack = [];
 let currentFiles = [];
+let filteredFiles = [];
 let selectedFiles = new Set();
 let viewMode = localStorage.getItem('udrive-view-mode') || 'list';
+let sortBy = localStorage.getItem('udrive-sort-by') || 'name';
+let sortDir = localStorage.getItem('udrive-sort-dir') || 'asc';
+let searchQuery = '';
+let starredFiles = JSON.parse(localStorage.getItem('udrive-starred') || '[]');
+let recentFiles = JSON.parse(localStorage.getItem('udrive-recent') || '[]');
 
 let clipboard = {
   files: [],
@@ -225,6 +231,199 @@ function formatFileSize(bytes) {
   return `${(size / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
+
+// === SEARCH, SORT, FILTER ===
+
+function applySearchAndSort() {
+  let files = [...currentFiles];
+  if (searchQuery) {
+    const q = searchQuery.toLowerCase();
+    files = files.filter(f => f.name.toLowerCase().includes(q));
+  }
+  const folders = files.filter(f => f.mimeType === 'application/vnd.google-apps.folder');
+  const items = files.filter(f => f.mimeType !== 'application/vnd.google-apps.folder');
+  const sortFn = (a, b) => {
+    let cmp = 0;
+    switch (sortBy) {
+      case 'name': cmp = a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }); break;
+      case 'modified': cmp = new Date(a.modifiedTime || 0) - new Date(b.modifiedTime || 0); break;
+      case 'size': cmp = (parseInt(a.size) || 0) - (parseInt(b.size) || 0); break;
+      case 'type': cmp = (a.mimeType || '').localeCompare(b.mimeType || ''); break;
+      default: cmp = a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+    }
+    return sortDir === 'asc' ? cmp : -cmp;
+  };
+  folders.sort(sortFn);
+  items.sort(sortFn);
+  filteredFiles = [...folders, ...items];
+}
+
+function getFolderSizeTotal() {
+  return currentFiles.reduce((sum, f) => sum + (parseInt(f.size) || 0), 0);
+}
+
+// === STARRED FILES ===
+function isStarred(fileId) { return starredFiles.includes(fileId); }
+function toggleStar(fileId) {
+  if (starredFiles.includes(fileId)) {
+    starredFiles = starredFiles.filter(id => id !== fileId);
+    showToast('Removed from starred', 'info');
+  } else {
+    starredFiles.push(fileId);
+    showToast('Added to starred', 'success');
+  }
+  localStorage.setItem('udrive-starred', JSON.stringify(starredFiles));
+}
+
+// === RECENT FILES ===
+function addRecentFile(file) {
+  recentFiles = recentFiles.filter(f => f.id !== file.id);
+  recentFiles.unshift({ id: file.id, name: file.name, mimeType: file.mimeType, size: file.size, at: Date.now() });
+  if (recentFiles.length > 50) recentFiles = recentFiles.slice(0, 50);
+  localStorage.setItem('udrive-recent', JSON.stringify(recentFiles));
+}
+
+// === BULK RENAME ===
+function showBulkRenameModal(files) {
+  const existing = document.getElementById('bulk-rename-modal');
+  if (existing) existing.remove();
+  const modal = document.createElement('div');
+  modal.id = 'bulk-rename-modal';
+  modal.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black/50';
+  modal.innerHTML = `
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-lg mx-4 flex flex-col max-h-[85vh]">
+      <div class="p-4 border-b border-gray-200 dark:border-gray-700">
+        <h3 class="text-sm font-semibold">Bulk Rename (${files.length} files)</h3>
+      </div>
+      <div class="p-4 overflow-auto space-y-4">
+        <div>
+          <label class="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">Mode</label>
+          <select id="rename-mode" class="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700">
+            <option value="prefix">Add Prefix</option>
+            <option value="suffix">Add Suffix</option>
+            <option value="replace">Find & Replace</option>
+            <option value="numbering">Sequential Numbering</option>
+          </select>
+        </div>
+        <div id="rename-prefix-group">
+          <label class="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">Prefix</label>
+          <input id="rename-prefix" type="text" class="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700" placeholder="e.g. Vacation_">
+        </div>
+        <div id="rename-suffix-group" class="hidden">
+          <label class="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">Suffix (before extension)</label>
+          <input id="rename-suffix" type="text" class="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700" placeholder="e.g. _edited">
+        </div>
+        <div id="rename-replace-group" class="hidden">
+          <label class="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">Find</label>
+          <input id="rename-find" type="text" class="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700 mb-2" placeholder="Text to find">
+          <label class="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">Replace with</label>
+          <input id="rename-replace-val" type="text" class="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700" placeholder="Replacement text">
+        </div>
+        <div id="rename-number-group" class="hidden">
+          <label class="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">Base Name</label>
+          <input id="rename-base" type="text" class="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700 mb-2" placeholder="e.g. Photo">
+          <div class="flex gap-4">
+            <div><label class="text-xs text-gray-500 block mb-1">Start</label><input id="rename-start" type="number" value="1" min="0" class="w-20 text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700"></div>
+            <div><label class="text-xs text-gray-500 block mb-1">Padding</label><input id="rename-padding" type="number" value="3" min="1" max="10" class="w-20 text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700"></div>
+          </div>
+        </div>
+        <div class="pt-2">
+          <p class="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">Preview:</p>
+          <div id="rename-preview" class="text-xs text-gray-500 dark:text-gray-400 space-y-1 max-h-32 overflow-auto bg-gray-50 dark:bg-gray-900 rounded-lg p-2"></div>
+        </div>
+      </div>
+      <div class="p-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-2">
+        <button id="rename-cancel" class="btn-secondary text-sm">Cancel</button>
+        <button id="rename-apply" class="btn-primary text-sm">Rename ${files.length} Files</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  const modeSelect = modal.querySelector('#rename-mode');
+  const groups = { prefix: 'rename-prefix-group', suffix: 'rename-suffix-group', replace: 'rename-replace-group', numbering: 'rename-number-group' };
+  function updateGroups() {
+    Object.values(groups).forEach(id => modal.querySelector('#'+id).classList.add('hidden'));
+    modal.querySelector('#'+groups[modeSelect.value]).classList.remove('hidden');
+    updatePreview();
+  }
+  function getNewName(file, idx) {
+    const mode = modeSelect.value;
+    const name = file.name;
+    const dot = name.lastIndexOf('.');
+    const base = dot > 0 ? name.substring(0, dot) : name;
+    const ext = dot > 0 ? name.substring(dot) : '';
+    switch (mode) {
+      case 'prefix': return (modal.querySelector('#rename-prefix').value || '') + name;
+      case 'suffix': return base + (modal.querySelector('#rename-suffix').value || '') + ext;
+      case 'replace': { const f = modal.querySelector('#rename-find').value || ''; const r = modal.querySelector('#rename-replace-val').value || ''; return f ? name.replaceAll(f, r) : name; }
+      case 'numbering': { const b = modal.querySelector('#rename-base').value || 'File'; const s = parseInt(modal.querySelector('#rename-start').value) || 1; const p = parseInt(modal.querySelector('#rename-padding').value) || 3; return b + '_' + String(s + idx).padStart(p, '0') + ext; }
+      default: return name;
+    }
+  }
+  function updatePreview() {
+    const prev = modal.querySelector('#rename-preview');
+    prev.innerHTML = files.slice(0, 5).map((f, i) => {
+      const n = getNewName(f, i);
+      return n !== f.name ? '<div class="text-blue-600 dark:text-blue-400">' + escapeHtml(f.name) + ' → <strong>' + escapeHtml(n) + '</strong></div>' : '<div>' + escapeHtml(f.name) + '</div>';
+    }).join('') + (files.length > 5 ? '<div class="text-gray-400">...and ' + (files.length - 5) + ' more</div>' : '');
+  }
+  modeSelect.addEventListener('change', updateGroups);
+  ['rename-prefix','rename-suffix','rename-find','rename-replace-val','rename-base','rename-start','rename-padding'].forEach(id => { const el = modal.querySelector('#'+id); if (el) el.addEventListener('input', updatePreview); });
+  updateGroups();
+  modal.querySelector('#rename-cancel').addEventListener('click', () => modal.remove());
+  modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+  modal.querySelector('#rename-apply').addEventListener('click', async () => {
+    const btn = modal.querySelector('#rename-apply'); btn.disabled = true; btn.textContent = 'Renaming...';
+    let ok = 0;
+    for (let i = 0; i < files.length; i++) {
+      const n = getNewName(files[i], i);
+      if (n === files[i].name) { ok++; continue; }
+      try { await api('/api/files/' + files[i].id, { method: 'PATCH', body: JSON.stringify({ name: n }) }); ok++; } catch (e) { showToast('Failed: ' + files[i].name, 'error'); }
+    }
+    showToast('Renamed ' + ok + ' files', 'success'); modal.remove();
+    const p = getQueryParams(); loadFiles(p.get('folderId'));
+  });
+}
+
+// === DRAG SELECT (Area Selection) ===
+let dragSelectActive = false, dragSelectStart = null, dragSelectBox = null;
+function initDragSelect(container) {
+  container.addEventListener('mousedown', (e) => {
+    if (e.target.closest('.file-item') || e.target.closest('.file-more-btn') || e.button !== 0) return;
+    dragSelectActive = true; dragSelectStart = { x: e.clientX, y: e.clientY };
+    dragSelectBox = document.createElement('div');
+    dragSelectBox.className = 'fixed border-2 border-blue-400 bg-blue-400/10 z-30 pointer-events-none';
+    document.body.appendChild(dragSelectBox);
+    const onMove = (ev) => {
+      if (!dragSelectActive) return;
+      const x1 = Math.min(dragSelectStart.x, ev.clientX), y1 = Math.min(dragSelectStart.y, ev.clientY);
+      const x2 = Math.max(dragSelectStart.x, ev.clientX), y2 = Math.max(dragSelectStart.y, ev.clientY);
+      Object.assign(dragSelectBox.style, { left: x1+'px', top: y1+'px', width: (x2-x1)+'px', height: (y2-y1)+'px' });
+      selectedFiles.clear();
+      container.querySelectorAll('.file-item').forEach(row => {
+        const r = row.getBoundingClientRect();
+        if (r.left < x2 && r.right > x1 && r.top < y2 && r.bottom > y1) selectedFiles.add(row.dataset.id);
+      });
+      selectionMode = selectedFiles.size > 0; updateSelectionUI();
+    };
+    const onUp = () => {
+      dragSelectActive = false;
+      if (dragSelectBox) { dragSelectBox.remove(); dragSelectBox = null; }
+      document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
+  });
+}
+
+// === SHARE LINK ===
+async function generateShareLink(fileId, fileName) {
+  try {
+    const res = await api('/api/files/' + fileId + '/share-link', { method: 'POST' });
+    if (res.url) { await navigator.clipboard.writeText(res.url); showToast('Share link copied!', 'success'); return; }
+  } catch {}
+  await navigator.clipboard.writeText('https://drive.google.com/file/d/' + fileId + '/view');
+  showToast('Google Drive link copied!', 'success');
+}
+
 function clearSelection() {
   selectedFiles.clear();
   updateSelectionUI();
@@ -275,6 +474,7 @@ async function loadFiles(folderId) {
 
   try {
     currentFiles = await api(`/api/files${params}`);
+    applySearchAndSort();
     selectedFiles.clear();
     renderFileList(main, folderId);
   } catch (err) {
@@ -290,8 +490,9 @@ async function loadFiles(folderId) {
 
 function renderFileList(main, folderId) {
   const container = main.querySelector('.file-list-container');
+  const files = filteredFiles.length > 0 || searchQuery ? filteredFiles : currentFiles;
 
-  if (currentFiles.length === 0) {
+  if (files.length === 0) {
     container.innerHTML = `
       <div class="flex flex-col items-center justify-center h-64 text-gray-500 dark:text-gray-400">
         <span class="material-icons-outlined text-5xl mb-3">folder_open</span>
@@ -310,19 +511,20 @@ function renderFileList(main, folderId) {
 }
 
 function renderListView(container) {
+  const files = filteredFiles.length > 0 || searchQuery ? filteredFiles : currentFiles;
   container.innerHTML = `
     <div class="overflow-x-auto">
       <table class="w-full border-collapse">
         <thead>
           <tr class="text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider border-b border-gray-200 dark:border-gray-700">
-            <th class="pb-3 pt-2 sticky top-0 bg-white dark:bg-gray-900 z-[5] pl-4">Name</th>
-            <th class="pb-3 pt-2 hidden md:table-cell sticky top-0 bg-white dark:bg-gray-900 z-[5]">Modified</th>
-            <th class="pb-3 pt-2 hidden sm:table-cell sticky top-0 bg-white dark:bg-gray-900 z-[5]">Size</th>
+            <th class="pb-3 pt-2 sticky top-0 bg-white dark:bg-gray-900 z-[5] pl-4 cursor-pointer hover:text-blue-500" data-sort="name">Name ${sortBy==='name'?(sortDir==='asc'?'↑':'↓'):''}</th>
+            <th class="pb-3 pt-2 hidden md:table-cell sticky top-0 bg-white dark:bg-gray-900 z-[5] cursor-pointer hover:text-blue-500" data-sort="modified">Modified ${sortBy==='modified'?(sortDir==='asc'?'↑':'↓'):''}</th>
+            <th class="pb-3 pt-2 hidden sm:table-cell sticky top-0 bg-white dark:bg-gray-900 z-[5] cursor-pointer hover:text-blue-500" data-sort="size">Size ${sortBy==='size'?(sortDir==='asc'?'↑':'↓'):''}</th>
             <th class="pb-3 pt-2 pr-4 w-10 sticky top-0 bg-white dark:bg-gray-900 z-[5]"></th>
           </tr>
         </thead>
       <tbody>
-        ${currentFiles.map(file => {
+        ${files.map(file => {
           const targetId = file.shortcutDetails?.targetId || '';
           const targetMime = file.shortcutDetails?.targetMimeType || '';
           return `
@@ -352,9 +554,10 @@ function renderListView(container) {
 }
 
 function renderGridView(container) {
+  const files = filteredFiles.length > 0 || searchQuery ? filteredFiles : currentFiles;
   container.innerHTML = `
     <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2 md:gap-3">
-      ${currentFiles.map(file => {
+      ${files.map(file => {
         const isImage = file.mimeType?.startsWith('image/');
         const targetId = file.shortcutDetails?.targetId || '';
         const targetMime = file.shortcutDetails?.targetMimeType || '';
@@ -541,6 +744,10 @@ function showFileContextMenu(x, y, dataset) {
   }
 
   items.push({ icon: 'info', label: 'Info', action: 'info', handler: () => showFileInfo(dataset.id) });
+  if (!isFolder) {
+    items.push({ icon: isStarred(dataset.id) ? 'star' : 'star_outline', label: isStarred(dataset.id) ? 'Unstar' : 'Star', action: 'star', handler: () => { toggleStar(dataset.id); } });
+    items.push({ icon: 'link', label: 'Copy Share Link', action: 'share-link', handler: () => generateShareLink(dataset.id, dataset.name) });
+  }
 
   if (hasPermission('drive:copy')) {
     items.push({ icon: 'content_copy', label: 'Copy', action: 'copy', handler: () => {
@@ -671,6 +878,8 @@ async function showTransferModal(fileId, fileName, fileSize = 0, bulkFiles = nul
 
 async function downloadViaBrowserAction(fileId, name) {
   try {
+    const file = currentFiles.find(f => f.id === fileId);
+    if (file) addRecentFile(file);
     await downloadViaBrowser(fileId, name);
     showToast('Download started in browser', 'success');
   } catch (err) {
@@ -874,7 +1083,29 @@ export function renderFilesPage() {
               <span class="hidden sm:inline">Upload</span>
             </button>
             <input type="file" id="file-input" class="hidden" multiple>` : ''}
+            <div class="flex items-center gap-2 mt-2 sm:mt-0">
+              <div class="relative">
+                <span class="material-icons-outlined absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-base">search</span>
+                <input id="file-search" type="text" value="${searchQuery}" placeholder="Search files..." class="pl-8 pr-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 w-40 md:w-52 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+              </div>
+              <select id="file-sort" class="text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1.5 bg-white dark:bg-gray-700">
+                <option value="name" ${sortBy==='name'?'selected':''}>Name</option>
+                <option value="modified" ${sortBy==='modified'?'selected':''}>Date</option>
+                <option value="size" ${sortBy==='size'?'selected':''}>Size</option>
+                <option value="type" ${sortBy==='type'?'selected':''}>Type</option>
+              </select>
+              <button id="sort-dir" class="p-1.5 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700" title="Sort direction">
+                <span class="material-icons-outlined text-base">${sortDir==='asc'?'arrow_upward':'arrow_downward'}</span>
+              </button>
+            </div>
           </div>
+          ${currentFiles.length > 0 ? `<div class="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400 mb-2">
+            <span>${filteredFiles.length || currentFiles.length} items</span>
+            <span>·</span>
+            <span>${formatFileSize(getFolderSizeTotal())} total</span>
+            ${starredFiles.length > 0 ? `<span>·</span><a href="#/starred" class="text-amber-500 hover:text-amber-600 flex items-center gap-0.5"><span class="material-icons-outlined text-sm">star</span>${starredFiles.length} starred</a>` : ''}
+            ${recentFiles.length > 0 ? `<span>·</span><a href="#/recent" class="text-blue-500 hover:text-blue-600 flex items-center gap-0.5"><span class="material-icons-outlined text-sm">history</span>Recent</a>` : ''}
+          </div>` : ''}
         </div>
 
         <div id="bulk-actions" class="hidden mb-2 flex items-center gap-1 px-2 py-1 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
@@ -894,6 +1125,12 @@ export function renderFilesPage() {
           ${hasPermission('drive:transfer_owner') ? `<button id="bulk-transfer" class="p-1.5 rounded-full hover:bg-purple-100 dark:hover:bg-purple-900/30 text-purple-600 transition-colors" title="Transfer Owner">
             <span class="material-icons-outlined text-base">swap_horiz</span>
           </button>` : ''}
+          <button id="bulk-rename" class="p-1.5 rounded-full hover:bg-orange-100 dark:hover:bg-orange-900/30 text-orange-600 transition-colors" title="Bulk Rename">
+            <span class="material-icons-outlined text-base">drive_file_rename_outline</span>
+          </button>
+          <button id="bulk-share-link" class="p-1.5 rounded-full hover:bg-green-100 dark:hover:bg-green-900/30 text-green-600 transition-colors" title="Copy Share Links">
+            <span class="material-icons-outlined text-base">link</span>
+          </button>
           <button id="bulk-clear" class="p-1.5 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors" title="Clear">
             <span class="material-icons-outlined text-base">close</span>
           </button>
@@ -1021,6 +1258,69 @@ export function renderFilesPage() {
   api('/api/accounts/refresh-all-storage', { method: 'POST' })
     .then(() => renderSidebar())
     .catch(() => {});
+
+  // Search handler
+  const searchInput = main.querySelector('#file-search');
+  if (searchInput) {
+    let searchTimer;
+    searchInput.addEventListener('input', () => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => {
+        searchQuery = searchInput.value;
+        applySearchAndSort();
+        renderFileList(main, folderId);
+      }, 200);
+    });
+  }
+
+  // Sort handler
+  main.querySelector('#file-sort')?.addEventListener('change', (e) => {
+    sortBy = e.target.value;
+    localStorage.setItem('udrive-sort-by', sortBy);
+    applySearchAndSort();
+    renderFileList(main, folderId);
+  });
+  main.querySelector('#sort-dir')?.addEventListener('click', () => {
+    sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+    localStorage.setItem('udrive-sort-dir', sortDir);
+    applySearchAndSort();
+    renderFileList(main, folderId);
+  });
+
+  // Sort by column headers (list view)
+  main.querySelectorAll('th[data-sort]').forEach(th => {
+    th.addEventListener('click', () => {
+      const col = th.dataset.sort;
+      if (sortBy === col) { sortDir = sortDir === 'asc' ? 'desc' : 'asc'; }
+      else { sortBy = col; sortDir = 'asc'; }
+      localStorage.setItem('udrive-sort-by', sortBy);
+      localStorage.setItem('udrive-sort-dir', sortDir);
+      applySearchAndSort();
+      renderFileList(main, folderId);
+    });
+  });
+
+  // Bulk rename
+  main.querySelector('#bulk-rename')?.addEventListener('click', () => {
+    const files = [...selectedFiles].map(id => currentFiles.find(f => f.id === id)).filter(Boolean);
+    if (files.length === 0) return;
+    showBulkRenameModal(files);
+  });
+
+  // Bulk share link
+  main.querySelector('#bulk-share-link')?.addEventListener('click', async () => {
+    const links = [];
+    for (const id of selectedFiles) {
+      const file = currentFiles.find(f => f.id === id);
+      if (file) links.push(file.name + ': https://drive.google.com/file/d/' + id + '/view');
+    }
+    await navigator.clipboard.writeText(links.join('\n'));
+    showToast(selectedFiles.size + ' links copied!', 'success');
+  });
+
+  // Drag select
+  const fileListContainer = main.querySelector('.file-list-container');
+  if (fileListContainer) initDragSelect(fileListContainer);
 
   loadFiles(folderId);
 
