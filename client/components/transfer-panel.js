@@ -1,3 +1,4 @@
+import { api } from '../api.js';
 let uploadQueue = [];
 let downloadQueue = [];
 let transferQueue = [];
@@ -75,6 +76,53 @@ export function addTransferOwnership(fileId, fileName, targetAccountId) {
   notifyChange();
   startTransferOwnership(item);
   return item;
+}
+
+// === PASTE (Move/Copy) with Progress ===
+export async function pasteWithProgress(files, action, sourceFolderId, destinationFolderId) {
+  const total = files.length;
+  let completed = 0;
+  let failed = 0;
+
+  for (const file of files) {
+    const item = {
+      id: Date.now() + Math.random(),
+      fileName: file.name,
+      type: 'transfer',
+      status: action === 'copy' ? 'copying' : 'moving',
+      progress: 0
+    };
+    transferQueue.push(item);
+    renderPanel(true);
+    notifyChange();
+
+    try {
+      if (action === 'copy') {
+        await api(`/api/files/${file.id}/copy`, {
+          method: 'POST',
+          body: JSON.stringify({ destinationId: destinationFolderId })
+        });
+      } else {
+        await api(`/api/files/${file.id}/move`, {
+          method: 'POST',
+          body: JSON.stringify({ newParentId: destinationFolderId, oldParentId: sourceFolderId })
+        });
+      }
+      item.status = 'done';
+      item.progress = 100;
+      completed++;
+    } catch (err) {
+      item.status = 'failed';
+      item.error = err.message;
+      failed++;
+    }
+
+    renderPanel(true);
+    notifyChange();
+  }
+
+  showToast(`${completed} item(s) ${action === 'copy' ? 'copied' : 'moved'}${failed ? `, ${failed} failed` : ''}`, failed ? 'error' : 'success');
+  return { completed, failed };
 }
 
 async function startTransferOwnership(item) {
@@ -569,7 +617,7 @@ function updateItemProgress(item) {
 
 function getHeaderText() {
   const all = getAllTransfers();
-  const active = all.filter(i => ['uploading', 'downloading', 'waiting'].includes(i.status)).length;
+  const active = all.filter(i => ['uploading', 'downloading', 'waiting', 'moving', 'copying', 'transferring'].includes(i.status)).length;
   const completed = all.filter(i => i.status === 'done').length;
   const total = all.length;
 
@@ -617,7 +665,7 @@ function updateFloatingButton() {
 function updateFloatingButtonContent() {
   if (!floatingBtn) return;
   const all = getAllTransfers();
-  const active = all.filter(i => ['uploading', 'downloading', 'waiting'].includes(i.status)).length;
+  const active = all.filter(i => ['uploading', 'downloading', 'waiting', 'moving', 'copying', 'transferring'].includes(i.status)).length;
 
   floatingBtn.innerHTML = `
     <span class="material-icons-outlined text-xl">${active > 0 ? 'sync' : 'check_circle'}</span>
@@ -703,13 +751,15 @@ function renderItem(item) {
     case 'uploading': statusIcon = 'upload'; statusColor = 'text-blue-500'; break;
     case 'downloading': statusIcon = 'download'; statusColor = 'text-green-500'; break;
     case 'transferring': statusIcon = 'swap_horiz'; statusColor = 'text-purple-500'; break;
+    case 'moving': statusIcon = 'drive_file_move'; statusColor = 'text-orange-500'; break;
+    case 'copying': statusIcon = 'content_copy'; statusColor = 'text-teal-500'; break;
     case 'paused': statusIcon = 'pause_circle'; statusColor = 'text-yellow-500'; break;
     case 'done': statusIcon = 'check_circle'; statusColor = 'text-green-500'; break;
     case 'failed': statusIcon = 'error'; statusColor = 'text-red-500'; break;
     case 'cancelled': statusIcon = 'cancel'; statusColor = 'text-gray-400'; break;
   }
 
-  const isActive = ['uploading', 'downloading', 'waiting', 'transferring'].includes(item.status);
+  const isActive = ['uploading', 'downloading', 'waiting', 'transferring', 'moving', 'copying'].includes(item.status);
   const isPaused = item.status === 'paused';
   const isDownloading = item.status === 'downloading';
 
