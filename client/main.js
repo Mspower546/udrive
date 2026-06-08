@@ -17,6 +17,8 @@ import { renderApiAccessPage } from './pages/api-access.js';
 import { renderApiDocsPage } from './pages/api-docs.js';
 import { renderSharePublicPage } from './pages/share-public.js';
 import { renderFileSharePage, destroyFileSharePage } from './pages/file-share.js';
+import { renderStarredPage } from './pages/starred.js';
+import { renderSessionsPage } from './pages/sessions.js';
 import { showLogoutModal } from './components/logout-modal.js';
 import { api } from './api.js';
 import { setCurrentUser, hasPermission, hasPageAccess, getCurrentUser } from './auth-state.js';
@@ -120,6 +122,13 @@ async function initApp() {
       if (!hasPageAccess('share')) { navigate('/'); return; }
       renderFileSharePage();
       return destroyFileSharePage;
+    });
+    registerRoute('/starred', () => {
+      if (!hasPageAccess('drive')) { navigate('/'); return; }
+      renderStarredPage();
+    });
+    registerRoute('/sessions', () => {
+      renderSessionsPage();
     });
     registerRoute('/login', renderLoginPage);
 
