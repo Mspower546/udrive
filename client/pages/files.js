@@ -416,12 +416,146 @@ function initDragSelect(container) {
 
 // === SHARE LINK ===
 async function generateShareLink(fileId, fileName) {
-  try {
-    const res = await api('/api/files/' + fileId + '/share-link', { method: 'POST' });
-    if (res.url) { await navigator.clipboard.writeText(res.url); showToast('Share link copied!', 'success'); return; }
-  } catch {}
-  await navigator.clipboard.writeText('https://drive.google.com/file/d/' + fileId + '/view');
-  showToast('Google Drive link copied!', 'success');
+  const files = [{ id: fileId, name: fileName }];
+  showShareLinkModal(files);
+}
+
+function showShareLinkModal(files) {
+  const existing = document.getElementById('share-link-modal');
+  if (existing) existing.remove();
+
+  const linkData = files.map(f => ({
+    name: f.name,
+    url: 'https://drive.google.com/file/d/' + f.id + '/view'
+  }));
+
+  const modal = document.createElement('div');
+  modal.id = 'share-link-modal';
+  modal.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black/50';
+  modal.innerHTML = `
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-lg mx-4 flex flex-col max-h-[85vh]">
+      <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="material-icons-outlined text-xl text-green-500">link</span>
+          <h3 class="text-sm font-semibold">Copy Share Links (${files.length} file${files.length > 1 ? 's' : ''})</h3>
+        </div>
+        <button id="share-link-close" class="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700">
+          <span class="material-icons-outlined text-lg">close</span>
+        </button>
+      </div>
+      <div class="p-4 space-y-4 overflow-auto flex-1">
+        <div class="flex items-center justify-between">
+          <label class="text-sm text-gray-700 dark:text-gray-300">Include file name</label>
+          <button id="toggle-include-name" class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors bg-blue-600">
+            <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform translate-x-6"></span>
+          </button>
+        </div>
+        <div>
+          <label class="text-sm text-gray-700 dark:text-gray-300 block mb-2">Format</label>
+          <div class="flex gap-2">
+            <button id="fmt-newline" class="flex-1 text-sm py-2 px-3 rounded-lg border-2 border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 font-medium transition-colors">Per Line</button>
+            <button id="fmt-comma" class="flex-1 text-sm py-2 px-3 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">Comma Separated</button>
+            <button id="fmt-space" class="flex-1 text-sm py-2 px-3 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">Space Separated</button>
+          </div>
+        </div>
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <label class="text-sm text-gray-700 dark:text-gray-300">Preview</label>
+            <span id="link-count" class="text-xs text-gray-400">${files.length} links</span>
+          </div>
+          <pre id="share-link-preview" class="text-xs text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-900 rounded-lg p-3 max-h-48 overflow-auto whitespace-pre-wrap break-all border border-gray-200 dark:border-gray-700"></pre>
+        </div>
+      </div>
+      <div class="p-4 border-t border-gray-200 dark:border-gray-700 flex justify-between items-center">
+        <span id="char-count" class="text-xs text-gray-400"></span>
+        <div class="flex gap-2">
+          <button id="share-link-cancel" class="btn-secondary text-sm">Cancel</button>
+          <button id="share-link-copy" class="btn-primary text-sm flex items-center gap-1.5">
+            <span class="material-icons-outlined text-base">content_copy</span>
+            Copy to Clipboard
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+
+  let includeName = true;
+  let format = 'newline'; // newline, comma, space
+
+  function getSep() {
+    if (format === 'comma') return ', ';
+    if (format === 'space') return ' ';
+    return '\n';
+  }
+
+  function updatePreview() {
+    const sep = getSep();
+    const lines = linkData.map(d => includeName ? d.name + ': ' + d.url : d.url);
+    const text = lines.join(sep);
+    modal.querySelector('#share-link-preview').textContent = text;
+    modal.querySelector('#char-count').textContent = text.length + ' characters';
+  }
+
+  function setFormat(fmt) {
+    format = fmt;
+    ['fmt-newline', 'fmt-comma', 'fmt-space'].forEach(id => {
+      const btn = modal.querySelector('#' + id);
+      if (id === 'fmt-' + fmt) {
+        btn.className = 'flex-1 text-sm py-2 px-3 rounded-lg border-2 border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 font-medium transition-colors';
+      } else {
+        btn.className = 'flex-1 text-sm py-2 px-3 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors';
+      }
+    });
+    updatePreview();
+  }
+
+  // Toggle include name
+  modal.querySelector('#toggle-include-name').addEventListener('click', () => {
+    includeName = !includeName;
+    const btn = modal.querySelector('#toggle-include-name');
+    const dot = btn.querySelector('span');
+    if (includeName) {
+      btn.className = 'relative inline-flex h-6 w-11 items-center rounded-full transition-colors bg-blue-600';
+      dot.className = 'inline-block h-4 w-4 transform rounded-full bg-white transition-transform translate-x-6';
+    } else {
+      btn.className = 'relative inline-flex h-6 w-11 items-center rounded-full transition-colors bg-gray-300 dark:bg-gray-600';
+      dot.className = 'inline-block h-4 w-4 transform rounded-full bg-white transition-transform translate-x-1';
+    }
+    updatePreview();
+  });
+
+  // Format buttons
+  modal.querySelector('#fmt-newline').addEventListener('click', () => setFormat('newline'));
+  modal.querySelector('#fmt-comma').addEventListener('click', () => setFormat('comma'));
+  modal.querySelector('#fmt-space').addEventListener('click', () => setFormat('space'));
+
+  // Close
+  modal.querySelector('#share-link-close').addEventListener('click', () => modal.remove());
+  modal.querySelector('#share-link-cancel').addEventListener('click', () => modal.remove());
+  modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+
+  // Copy
+  modal.querySelector('#share-link-copy').addEventListener('click', async () => {
+    const text = modal.querySelector('#share-link-preview').textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast('Copied ' + files.length + ' link' + (files.length > 1 ? 's' : '') + '!', 'success');
+    } catch {
+      // Fallback
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+      showToast('Copied ' + files.length + ' link' + (files.length > 1 ? 's' : '') + '!', 'success');
+    }
+    modal.remove();
+  });
+
+  updatePreview();
 }
 
 function clearSelection() {
@@ -1308,14 +1442,13 @@ export function renderFilesPage() {
   });
 
   // Bulk share link
-  main.querySelector('#bulk-share-link')?.addEventListener('click', async () => {
-    const links = [];
-    for (const id of selectedFiles) {
+  main.querySelector('#bulk-share-link')?.addEventListener('click', () => {
+    const files = [...selectedFiles].map(id => {
       const file = currentFiles.find(f => f.id === id);
-      if (file) links.push(file.name + ': https://drive.google.com/file/d/' + id + '/view');
-    }
-    await navigator.clipboard.writeText(links.join('\n'));
-    showToast(selectedFiles.size + ' links copied!', 'success');
+      return file ? { id: file.id, name: file.name } : null;
+    }).filter(Boolean);
+    if (files.length === 0) return;
+    showShareLinkModal(files);
   });
 
   // Drag select
