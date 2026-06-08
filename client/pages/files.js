@@ -3,7 +3,7 @@ import { getQueryParams } from '../router.js';
 import { renderBreadcrumb } from '../components/breadcrumb.js';
 import { showContextMenu, hideContextMenu } from '../components/context-menu.js';
 import { showToast } from '../components/toast.js';
-import { addToUploadQueue, onUploadComplete, downloadBackground, downloadViaBrowser, addTransferOwnership } from '../components/transfer-panel.js';
+import { addToUploadQueue, onUploadComplete, downloadBackground, downloadViaBrowser, addTransferOwnership, pasteWithProgress } from '../components/transfer-panel.js';
 import { renderSidebar } from '../components/sidebar.js';
 import { hasPermission } from '../auth-state.js';
 import { formatDate } from '../time-utils.js';
@@ -66,37 +66,20 @@ async function pasteFiles() {
 
   const params = getQueryParams();
   const destinationId = params.get('folderId') || null;
+  const action = clipboard.action;
+  const sourceFolderId = clipboard.sourceFolderId;
+  const files = [...clipboard.files];
 
-  let success = 0;
-  for (const file of clipboard.files) {
-    try {
-      if (clipboard.action === 'copy') {
-        await api(`/api/files/${file.id}/copy`, {
-          method: 'POST',
-          body: JSON.stringify({ destinationId })
-        });
-      } else {
-        await api(`/api/files/${file.id}/move`, {
-          method: 'POST',
-          body: JSON.stringify({ newParentId: destinationId, oldParentId: clipboard.sourceFolderId })
-        });
-      }
-      success++;
-    } catch (err) {
-      showToast(`Failed: ${err.message}`, 'error');
-    }
-  }
-
-  showToast(`${success} item(s) pasted`, 'success');
-
-  if (clipboard.action === 'cut') {
+  if (action === 'cut') {
     clipboard = { files: [], action: null, sourceFolderId: null };
+    updatePasteButton();
   }
-  updatePasteButton();
+
+  await pasteWithProgress(files, action, sourceFolderId, destinationId);
+
   loadFiles(destinationId);
   renderSidebar();
 }
-
 function saveFolderStack() {
   sessionStorage.setItem('udrive-folder-stack', JSON.stringify(folderStack));
 }
