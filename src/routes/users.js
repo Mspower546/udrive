@@ -208,4 +208,98 @@ users.patch('/:id/password', async (c) => {
   return c.json({ success: true });
 });
 
+// === SESSION MANAGEMENT ===
+
+users.get('/sessions', async (c) => {
+  const user = c.get('user');
+  const err = requireAuth(c, user);
+  if (err) return err;
+
+  const db = c.get("db");
+  
+  // Get current session token
+  const cookie = c.req.header('Cookie') || '';
+  const match = cookie.match(/udrive_session=([^;]+)/);
+  const currentToken = match ? match[1] : '';
+  
+  // Get IP and UA for current request (we'll add these to existing sessions on read)
+  const currentIP = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || c.req.header('X-Real-IP') || '';
+  const currentUA = c.req.header('User-Agent') || '';
+
+  if (user.role === 'master') {
+    // Master can see all sessions
+    const { results: sessions } = await db.prepare(
+      'SELECT s.token, s.user_id, s.expires_at, u.username FROM sessions s JOIN users u ON s.user_id = u.id ORDER BY s.expires_at DESC'
+    ).all();
+    
+    return c.json({
+      sessions: sessions.map(s => ({
+        token: s.token,
+        user_id: s.user_id,
+        username: s.username,
+        created_at: s.expires_at,
+        last_activity: s.expires_at,
+        ip: s.token === currentToken ? currentIP : '',
+        user_agent: s.token === currentToken ? currentUA : ''
+      })),
+      currentToken
+    });
+  } else {
+    // Slaves can only see their own sessions
+    const { results: sessions } = await db.prepare(
+      'SELECT token, user_id, expires_at FROM sessions WHERE user_id = ? ORDER BY expires_at DESC'
+    ).bind(user.id).all();
+    
+    return c.json({
+      sessions: sessions.map(s => ({
+        token: s.token,
+        user_id: s.user_id,
+        username: user.username,
+        created_at: s.expires_at,
+        last_activity: s.expires_at,
+        ip: s.token === currentToken ? currentIP : '',
+        user_agent: s.token === currentToken ? currentUA : ''
+      })),
+      currentToken
+    });
+  }
+});
+
+users.delete('/sessions/:token', async (c) => {
+  const user = c.get('user');
+  const err = requireAuth(c, user);
+  if (err) return err;
+
+  const db = c.get("db");
+  const token = c.req.param('token');
+
+  // Verify the session belongs to this user or user is master
+  const session = await db.prepare('SELECT user_id FROM sessions WHERE token = ?').bind(token).first();
+  if (!session) return c.json({ error: 'Session not found' }, 404);
+  if (user.role !== 'master' && session.user_id !== user.id) {
+    return c.json({ error: 'Permission denied' }, 403);
+  }
+
+  await deleteSession(db, token);
+  return c.json({ success: true });
+});
+
+users.delete('/sessions/others', async (c) => {
+  const user = c.get('user');
+  const err = requireAuth(c, user);
+  if (err) return err;
+
+  const db = c.get("db");
+  const cookie = c.req.header('Cookie') || '';
+  const match = cookie.match(/udrive_session=([^;]+)/);
+  const currentToken = match ? match[1] : '';
+
+  if (currentToken) {
+    await db.prepare('DELETE FROM sessions WHERE user_id = ? AND token != ?').bind(user.id, currentToken).run();
+  } else {
+    await db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(user.id).run();
+  }
+  return c.json({ success: true });
+});
+
 export default users;
