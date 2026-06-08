@@ -230,10 +230,10 @@ async function uploadWithProgress(item) {
         } catch {}
       }
 
-      // Network error — retry
-      if (err.message.includes('Network') && retries < maxRetries - 1) {
+      // Network error ya stall — retry
+      if ((err.message.includes('Network') || err.message.includes('stalled')) && retries < maxRetries - 1) {
         retries++;
-        item.error = `Network error, retrying... (${retries}/${maxRetries})`;
+        item.error = `Connection issue, retrying... (${retries}/${maxRetries})`;
         renderPanel(true);
         await new Promise(r => setTimeout(r, 2000 * retries));
         continue;
@@ -319,10 +319,30 @@ export async function uploadToGoogle(progressItem, file, accessToken, folderId, 
 
     let lastLoaded = 0;
     let lastTime = Date.now();
+    let lastProgressTime = Date.now(); // Track when progress last changed
+    let startedAt = Date.now();
+
+    // Timeout: agar 60 second tak koi progress na ho to fail karo
+    const timeoutCheck = setInterval(() => {
+      const timeSinceProgress = Date.now() - lastProgressTime;
+      if (timeSinceProgress > 60000) { // 60 second no progress
+        clearInterval(timeoutCheck);
+        xhr.abort();
+        reject(new Error('Upload stalled — no progress for 60 seconds. Check your connection and retry.'));
+      }
+      // Update "uploading..." status even at 0% so user knows it's active
+      if (progressItem && progressItem.progress === 0) {
+        const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+        progressItem.error = null; // Clear any previous error
+        const statusEl = document.querySelector(`[data-status-id="${progressItem.id}"]`);
+        if (statusEl) statusEl.textContent = `Uploading... ${elapsed}s`;
+      }
+    }, 2000);
 
     xhr.upload.addEventListener('progress', (e) => {
       if (e.lengthComputable) {
         const pct = Math.round((e.loaded / e.total) * 100);
+        lastProgressTime = Date.now(); // Reset timeout timer
         if (progressItem) {
           progressItem.progress = pct;
           const now = Date.now();
@@ -339,6 +359,7 @@ export async function uploadToGoogle(progressItem, file, accessToken, folderId, 
     });
 
     xhr.addEventListener('load', () => {
+      clearInterval(timeoutCheck);
       putStatus = xhr.status;
       if (xhr.status >= 200 && xhr.status < 300) {
         try { resolve(JSON.parse(xhr.responseText)); }
@@ -352,9 +373,16 @@ export async function uploadToGoogle(progressItem, file, accessToken, folderId, 
       }
     });
 
-    // Network error par bhi reject NAHI karte — neeche status check karenge
-    xhr.addEventListener('error', () => resolve(null));
-    xhr.addEventListener('abort', () => reject(new Error('Cancelled')));
+    // Network error — REJECT so retry logic can handle it
+    xhr.addEventListener('error', () => {
+      clearInterval(timeoutCheck);
+      reject(new Error('Network error during upload'));
+    });
+
+    xhr.addEventListener('abort', () => {
+      clearInterval(timeoutCheck);
+      reject(new Error('Cancelled'));
+    });
 
     xhr.open('PUT', uploadUrl);
     xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
@@ -530,8 +558,10 @@ function updateItemProgress(item) {
   if (!panelEl || isMinimized || !panelVisible) return;
   const progressBar = panelEl.querySelector(`[data-progress-id="${item.id}"]`);
   const speedEl = panelEl.querySelector(`[data-speed-id="${item.id}"]`);
+  const statusEl = panelEl.querySelector(`[data-status-id="${item.id}"]`);
   if (progressBar) progressBar.style.width = `${item.progress}%`;
   if (speedEl) speedEl.textContent = formatSpeed(item.speed);
+  if (statusEl) statusEl.textContent = `${item.progress}%`;
 
   const headerEl = panelEl.querySelector('#transfer-header-text');
   if (headerEl) headerEl.textContent = getHeaderText();
@@ -696,7 +726,7 @@ function renderItem(item) {
             <div data-progress-id="${item.id}" class="h-full rounded-full ${item.type === 'upload' ? 'bg-blue-500' : 'bg-green-500'} ${isPaused ? 'opacity-50' : ''} transition-all duration-300" style="width: ${item.progress}%"></div>
           </div>
           <div class="flex items-center justify-between mt-0.5">
-            <span class="text-[10px] text-gray-400">${item.progress}%</span>
+            <span data-status-id="${item.id}" class="text-[10px] text-gray-400">${item.progress}%</span>
             <span class="text-[10px] text-gray-400">${formatSize(item.size || item.totalSize || 0)}</span>
           </div>
         ` : ''}
