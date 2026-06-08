@@ -30,10 +30,12 @@ export function updateSidebarContent(sidebar, totalUsed, totalLimit, collapsed) 
 
   const navItems = [];
   if (hasPageAccess('drive')) navItems.push({ path: '/', icon: 'folder', label: 'My Drive' });
+  navItems.push({ path: '/starred', icon: 'star', label: 'Starred' });
   navItems.push({ path: '/transfer', icon: 'swap_vert', label: 'Transfers' });
   if (hasPageAccess('trash')) navItems.push({ path: '/trash', icon: 'delete', label: 'Trash' });
   if (hasPageAccess('accounts')) navItems.push({ path: '/accounts', icon: 'people', label: 'Accounts' });
   if (hasPageAccess('settings')) navItems.push({ path: '/settings', icon: 'settings', label: 'Settings' });
+  navItems.push({ path: '/sessions', icon: 'devices', label: 'Sessions' });
   if (isMaster || hasPermission('admin:view_users')) navItems.push({ path: '/users', icon: 'admin_panel_settings', label: 'Users' });
   if (isMaster || hasPermission('admin:view_activity')) navItems.push({ path: '/activity', icon: 'history', label: 'Activity' });
   if (isMaster || hasPermission('admin:view_logs')) navItems.push({ path: '/logs', icon: 'terminal', label: 'Logs' });
